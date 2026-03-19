@@ -1,0 +1,20 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+ROOT="/Users/sensen/Desktop/codex/obsidian-kb"
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: kb-session-clipboard <tool> [project] [title]" >&2
+  exit 1
+fi
+
+tool="$1"
+project="${2:-shared}"
+title="${3:-}"
+
+if [[ -n "$title" ]]; then
+  "$ROOT/kb-ai" session collect --source-type clipboard --tool "$tool" --project "$project" --title "$title"
+else
+  "$ROOT/kb-ai" session collect --source-type clipboard --tool "$tool" --project "$project"
+fi

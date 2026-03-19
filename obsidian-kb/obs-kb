@@ -1,0 +1,122 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+OBSIDIAN_BIN="/Applications/Obsidian.app/Contents/MacOS/Obsidian"
+DEFAULT_VAULT="森林公园"
+
+if [[ ! -x "$OBSIDIAN_BIN" ]]; then
+  echo "Obsidian binary not found at $OBSIDIAN_BIN" >&2
+  exit 1
+fi
+
+run_obsidian() {
+  "$OBSIDIAN_BIN" "$@" vault="$DEFAULT_VAULT"
+}
+
+usage() {
+  cat <<'EOF'
+obs-kb: wrapper around the official Obsidian CLI for vault "森林公园"
+
+Usage:
+  obs-kb help
+  obs-kb files [folder]
+  obs-kb folders [folder]
+  obs-kb read <path>
+  obs-kb search <query> [folder]
+  obs-kb search-context <query> [folder]
+  obs-kb create <path> [content]
+  obs-kb append <path> <content>
+  obs-kb prepend <path> <content>
+  obs-kb rename <path> <new-name-without-path>
+  obs-kb move <path> <to-path>
+  obs-kb delete <path>
+  obs-kb prop-get <path> <name>
+  obs-kb prop-set <path> <name> <value> [type]
+  obs-kb prop-remove <path> <name>
+  obs-kb raw <official-cli-args...>
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  help)
+    usage
+    ;;
+  files)
+    if [[ $# -gt 0 ]]; then
+      run_obsidian files folder="$1"
+    else
+      run_obsidian files
+    fi
+    ;;
+  folders)
+    if [[ $# -gt 0 ]]; then
+      run_obsidian folders folder="$1"
+    else
+      run_obsidian folders
+    fi
+    ;;
+  read)
+    run_obsidian read path="${1:?path required}"
+    ;;
+  search)
+    query="${1:?query required}"
+    if [[ $# -gt 1 ]]; then
+      run_obsidian search query="$query" path="$2"
+    else
+      run_obsidian search query="$query"
+    fi
+    ;;
+  search-context)
+    query="${1:?query required}"
+    if [[ $# -gt 1 ]]; then
+      run_obsidian search:context query="$query" path="$2"
+    else
+      run_obsidian search:context query="$query"
+    fi
+    ;;
+  create)
+    path="${1:?path required}"
+    content="${2:-}"
+    run_obsidian create path="$path" content="$content"
+    ;;
+  append)
+    run_obsidian append path="${1:?path required}" content="${2:?content required}"
+    ;;
+  prepend)
+    run_obsidian prepend path="${1:?path required}" content="${2:?content required}"
+    ;;
+  rename)
+    run_obsidian rename path="${1:?path required}" name="${2:?new name required}"
+    ;;
+  move)
+    run_obsidian move path="${1:?path required}" to="${2:?destination path required}"
+    ;;
+  delete)
+    run_obsidian delete path="${1:?path required}"
+    ;;
+  prop-get)
+    run_obsidian property:read path="${1:?path required}" name="${2:?property name required}"
+    ;;
+  prop-set)
+    path="${1:?path required}"
+    name="${2:?property name required}"
+    value="${3:?property value required}"
+    type="${4:-text}"
+    run_obsidian property:set path="$path" name="$name" value="$value" type="$type"
+    ;;
+  prop-remove)
+    run_obsidian property:remove path="${1:?path required}" name="${2:?property name required}"
+    ;;
+  raw)
+    run_obsidian "$@"
+    ;;
+  *)
+    echo "Unknown command: $cmd" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

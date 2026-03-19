@@ -1,0 +1,13 @@
+.DS_Store
+
+# Keep this root repo focused on the Obsidian KB system.
+Product-Manager-Skills/
+qsb-mall/
+qsb-open-api/
+qsb-task/
+sen-shu/
+web-design-frontend-engineer/
+obsidian-kb/data/
+obsidian-kb/__pycache__/
+obsidian-kb/kb_ai/__pycache__/
+obsidian-kb/tests/__pycache__/
