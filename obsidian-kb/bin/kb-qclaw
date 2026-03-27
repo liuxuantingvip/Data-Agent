@@ -1,3 +1,0 @@
-#!/bin/zsh
-set -euo pipefail
-/Users/sensen/Desktop/codex/obsidian-kb/bin/kb-context qclaw "$@"

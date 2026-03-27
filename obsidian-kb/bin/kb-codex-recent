@@ -1,6 +1,0 @@
-#!/bin/zsh
-
-set -euo pipefail
-
-ROOT="/Users/sensen/Desktop/codex/obsidian-kb"
-"$ROOT/kb-ai" session recent "$@"

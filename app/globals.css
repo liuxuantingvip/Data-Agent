@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fcfcf9;
+  --foreground: #1e2a3a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-jakarta);
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background: linear-gradient(180deg, #fefefc 0%, #fbfbf8 52%, #fafaf7 100%);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), "SF Pro Text", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0) 34%),
+    linear-gradient(90deg, rgba(92, 116, 255, 0.02), rgba(92, 116, 255, 0) 16%, rgba(255, 196, 122, 0) 84%, rgba(255, 196, 122, 0.02));
+  opacity: 1;
+}
+
+::selection {
+  background: rgba(92, 116, 255, 0.2);
+  color: #142033;
+}
+
+a,
+button {
+  outline: none;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  box-shadow: 0 0 0 2px rgba(24, 24, 27, 0.08);
+  border-radius: 12px;
+}
+
+textarea:focus-visible {
+  box-shadow: none;
+}
+
+@keyframes ray-sweep-left {
+  0% {
+    transform: translate3d(-8px, 0, 0) rotate(-16deg) scaleY(0.96);
+    opacity: 0.38;
+  }
+  50% {
+    transform: translate3d(10px, 8px, 0) rotate(-10deg) scaleY(1.04);
+    opacity: 0.82;
+  }
+  100% {
+    transform: translate3d(-8px, 0, 0) rotate(-16deg) scaleY(0.96);
+    opacity: 0.38;
+  }
+}
+
+@keyframes ray-sweep-right {
+  0% {
+    transform: translate3d(8px, 0, 0) rotate(12deg) scaleY(0.98);
+    opacity: 0.34;
+  }
+  50% {
+    transform: translate3d(-12px, 10px, 0) rotate(7deg) scaleY(1.06);
+    opacity: 0.76;
+  }
+  100% {
+    transform: translate3d(8px, 0, 0) rotate(12deg) scaleY(0.98);
+    opacity: 0.34;
+  }
+}
+
+@keyframes ray-sweep-center {
+  0% {
+    transform: translateY(-2%) scaleY(0.98);
+    opacity: 0.32;
+  }
+  50% {
+    transform: translateY(3%) scaleY(1.04);
+    opacity: 0.76;
+  }
+  100% {
+    transform: translateY(-2%) scaleY(0.98);
+    opacity: 0.32;
+  }
+}
+
+@keyframes breathe-slow {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translateX(-50%) scale(0.96);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateX(-50%) scale(1.06);
+  }
+}
+
+@keyframes drift-up {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes sheen-pass {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(140%);
+  }
+}
+
+.animate-ray-sweep-left {
+  animation: ray-sweep-left 10s ease-in-out infinite;
+}
+
+.animate-ray-sweep-right {
+  animation: ray-sweep-right 12s ease-in-out infinite;
+}
+
+.animate-ray-sweep-center {
+  animation: ray-sweep-center 11s ease-in-out infinite;
+}
+
+.animate-breathe-slow {
+  animation: breathe-slow 10s ease-in-out infinite;
+}
+
+.animate-drift-up {
+  animation: drift-up 6s ease-in-out infinite;
+}
+
+.animate-sheen-pass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 0%, rgba(97, 126, 255, 0.12) 48%, transparent 100%);
+  transform: translateX(-120%);
+  animation: sheen-pass 5.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ray-sweep-left,
+  .animate-ray-sweep-right,
+  .animate-ray-sweep-center,
+  .animate-breathe-slow,
+  .animate-drift-up,
+  .animate-sheen-pass::after {
+    animation: none !important;
+  }
+}
+
+button[aria-label="Open Next.js Dev Tools"] {
+  display: none !important;
+}
+
+nextjs-portal,
+script[data-nextjs-dev-overlay] {
+  display: none !important;
+}
