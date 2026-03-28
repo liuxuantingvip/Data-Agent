@@ -3,7 +3,7 @@ import {
   siEbay,
   siGoogle,
   siTiktok,
-} from "simple-icons/icons";
+} from "simple-icons";
 
 type PlatformLogoProps = {
   name: string;

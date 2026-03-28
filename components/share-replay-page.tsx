@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BookOpen, Expand, FileText, X } from "lucide-react";
+import { BookOpen, Expand, FileText, ScanSearch, Sparkles, Workflow, X } from "lucide-react";
 
 import { useDemoState } from "@/lib/mock/store";
 
@@ -14,6 +14,104 @@ function pickRunId(shareId: string) {
   if (shareId === "yM2iGJyrFHeG8SfJojT9rP") return "run-default";
   if (shareId.includes("secondary")) return "run-secondary";
   return "run-default";
+}
+
+function getToolViewIndex(detail: string) {
+  if (detail.includes("写作要求") || detail.includes("算法") || detail.includes("FABE")) return 1;
+  if (detail.includes("关键词")) return 3;
+  if (detail.includes("ASIN") || detail.includes("五点描述") || detail.includes("标题")) return 2;
+  return 0;
+}
+
+function getToolViewLabel(detail: string, tabs: string[]) {
+  const targetTab = tabs[getToolViewIndex(detail)] ?? tabs[0] ?? "结果视图";
+  return `查看${targetTab}`;
+}
+
+type ShareStage = {
+  title: string;
+  body?: string;
+  tools?: Array<{ title: string; detail: string }>;
+  splitItems?: string[];
+};
+
+function deriveToolCode(detail: string) {
+  if (detail.includes("标题、五点描述") || detail.includes("竞品 ASIN")) return "_amazon_product_detail";
+  if (detail.includes("流量关键词")) return "_sif_asinKeywords";
+  if (detail.includes("写作要求") || detail.includes("COSMO") || detail.includes("FABE")) return "_tsearch_search";
+  if (detail.includes("统计 SIF 关键词数据") || detail.includes("关键词价值")) return "_dataQuery_executeDynamicQuery";
+  return "_tool_call";
+}
+
+function buildShareStages(timeline: Array<{ type: "label" | "body" | "tool"; text?: string; title?: string; detail?: string }>, summary: string) {
+  const firstBody = timeline.find((item) => item.type === "body")?.text ?? "";
+  const executionGroups: ShareStage[] = [];
+  let currentGroup: ShareStage | null = null;
+
+  for (const item of timeline) {
+    if (item.type === "label") {
+      if (["任务拆解", "整理并向用户汇总任务执行的结果"].includes(item.text ?? "")) continue;
+      currentGroup = { title: item.text ?? "任务执行", tools: [] };
+      executionGroups.push(currentGroup);
+      continue;
+    }
+
+    if (!currentGroup) continue;
+
+    if (item.type === "body") {
+      currentGroup.body = item.text;
+      continue;
+    }
+
+    if (item.type === "tool") {
+      currentGroup.tools?.push({
+        title: item.title ?? "调用工具",
+        detail: item.detail ?? "",
+      });
+    }
+  }
+
+  const splitItems = executionGroups.flatMap((group, index) => {
+    const firstTool = group.tools?.[0];
+    const toolCode = firstTool ? deriveToolCode(firstTool.detail) : "_tool_call";
+    const detail = group.body ?? firstTool?.detail ?? "补充该阶段所需的结构化结果。";
+    return `${index + 1}. ${toolCode}：${detail}`;
+  });
+
+  return {
+    intent: {
+      title: "完成思考",
+      body: firstBody,
+    },
+    split: {
+      title: "任务拆分",
+      splitItems,
+    },
+    execution: {
+      title: "任务执行",
+      groups: executionGroups,
+    },
+    result: {
+      title: "任务结果",
+      body: timeline[timeline.length - 1]?.type === "body" ? timeline[timeline.length - 1]?.text : summary,
+    },
+  };
+}
+
+function StageHeader({ icon, title }: { icon: ReactNode; title: string }) {
+  return (
+    <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-[#202124]">
+      <span className="flex h-5 w-5 items-center justify-center rounded-[6px] bg-[#f4f5f7] text-[#4b4f4d]">
+        {icon}
+      </span>
+      <span>{title}</span>
+      <span className="text-[#9aa39e]">^</span>
+    </div>
+  );
+}
+
+function StageParagraph({ children }: { children: ReactNode }) {
+  return <p className="text-[12px] leading-6 text-[#5e6763]">{children}</p>;
 }
 
 const shareCatalog: Record<
@@ -50,7 +148,7 @@ const shareCatalog: Record<
     objective:
       "努力思考，选择适合以下场景的工具，完美完成以下任务：亚马逊美国站，asin为:B0FPZHSLYR、B0CP9Z56SW、B0FFNF9TK1、B0FS7DRCLZ、B0CP9WRDFV、B0BWMZDCCN，我的竞品就是这些，你参考他们的五点描述和A+页面内容，生成我的商品的标题、五点描述。",
     timeline: [
-      { type: "label", text: "完成思考" },
+      { type: "label", text: "任务拆解" },
       {
         type: "body",
         text: "好的，我将为您规划任务。首先，我会获取这 6 个竞品 ASIN 的详细信息和流量关键词。接着，我会搜索最新的亚马逊 Listing 写作规范、COSMO 算法以及 FABE 营销法则。最后，结合竞品数据和理论模型，为您构建关键词价值表，并生成符合要求的标题和五点描述。",
@@ -147,6 +245,7 @@ export function ShareReplayPage({ shareId }: ShareReplayPageProps) {
   const run = runs.find((item) => item.id === runId) ?? runs[0];
   const report = reports.find((item) => item.runId === run.id) ?? reports[0];
   const shareData = shareCatalog[shareId];
+  const mainScrollerRef = useRef<HTMLDivElement>(null);
 
   const timeline = useMemo(() => {
     if (shareData) return shareData.timeline;
@@ -172,6 +271,19 @@ export function ShareReplayPage({ shareId }: ShareReplayPageProps) {
   const keywordRows = shareData?.keywordRows ?? [];
   const tabs = shareData?.tabs ?? ["竞品与关键词分析", "Listing文案生成", "查询竞品详情", "遍历查询关键词"];
   const summary = shareData?.summary ?? "我已完成分析。本次通过亚马逊商品详情工具成功获取了多条竞品记录，并补充了关键词、写作理论与结果汇总，可继续复看或做同款。";
+  const [activeTab, setActiveTab] = useState(0);
+  const stagedFlow = useMemo(() => buildShareStages(timeline, summary), [summary, timeline]);
+
+  useEffect(() => {
+    mainScrollerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeTab]);
+
+  const activeTabLabel = tabs[activeTab] ?? tabs[0];
+  const isInvalidShare = !shareData;
+
+  const selectTab = (index: number) => setActiveTab(Math.max(0, Math.min(index, tabs.length - 1)));
+  const openReportView = () => selectTab(0);
+  const openToolView = (detail: string) => selectTab(getToolViewIndex(detail));
 
   return (
     <div className="min-h-screen bg-[#f7f7f8] text-[#202124]">
@@ -194,89 +306,134 @@ export function ShareReplayPage({ shareId }: ShareReplayPageProps) {
         </div>
       </header>
 
-      <div className="grid min-h-[calc(100vh-44px)] grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col border-r border-[#e5e7eb] bg-[linear-gradient(180deg,#fcfcfd,#f5f5f5)]">
+      <div className="grid h-[calc(100vh-44px)] grid-cols-[360px_minmax(0,1fr)] overflow-hidden">
+        <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#e5e7eb] bg-[linear-gradient(180deg,#fcfcfd,#f5f5f5)]" data-testid="share-timeline">
           <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
-            <div className="mb-3 text-[11px] leading-6 text-[#6b7280]">{objective}</div>
-
-            <div className="space-y-3">
-              {timeline.map((item, index) => {
-                if (item.type === "label") {
-                  return (
-                    <div key={`${item.text}-${index}`} className="text-[13px] font-semibold text-[#202124]">
-                      {item.text} ^
-                    </div>
-                  );
-                }
-
-                if (item.type === "body") {
-                  return (
-                    <p key={`${item.text}-${index}`} className="text-[12px] leading-6 text-[#5e6763]">
-                      {item.text}
-                    </p>
-                  );
-                }
-
-                return (
-                  <div
-                    key={`${item.title}-${index}`}
-                    className="rounded-[12px] border border-[#eceef1] bg-white px-3 py-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.04)]"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-[12px] font-medium text-[#3f4542]">
-                        <div className="flex h-5 w-5 items-center justify-center rounded-full border border-[#e5e7eb] bg-[#fafafa]">
-                          <FileText className="h-3 w-3" />
-                        </div>
-                        调用工具
-                      </div>
-                      <button
-                        type="button"
-                        className="rounded-[8px] border border-[#e5e7eb] bg-[#fafafa] px-2 py-0.5 text-[11px] font-medium text-[#3a403d]"
-                      >
-                        查看
-                      </button>
-                    </div>
-                    <div className="mt-2 text-[11px] leading-5 text-[#6c7571]">{item.detail}</div>
-                  </div>
-                );
-              })}
+            {isInvalidShare ? (
+              <div className="mb-4 rounded-[12px] border border-[#f2d8d8] bg-[#fff6f6] px-3 py-3 text-[12px] leading-6 text-[#8e4b4b]">
+                当前分享链接不存在或已失效，以下内容为默认示例回放。
+              </div>
+            ) : null}
+            <div className="mb-4 rounded-[22px] bg-[#f2f2f3] px-4 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+              <div className="space-y-2 text-[14px] leading-8 text-[#202124]">
+                {objective.split(/\n+/).map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </div>
+              <div className="mt-3 text-right text-[11px] text-[#b0b4b8]">{generatedAt}</div>
             </div>
-          </div>
 
-          <div className="border-t border-[#e5e7eb] px-4 py-4">
-            <div className="mb-3 rounded-[12px] border border-[#d4d4d8] bg-[linear-gradient(180deg,#ffffff,#fafafa)] px-3 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <div className="space-y-5">
+              <div>
+                <div className="mb-3 flex items-center gap-2 text-[14px] font-medium text-[#303734]">
                   <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[#171717] text-white">
                     <FileText className="h-4 w-4" />
                   </div>
+                  MData Agent
+                </div>
+
+                <div className="space-y-4">
                   <div>
-                    <div className="text-[13px] font-medium text-[#24322b]">任务执行结果</div>
-                    <div className="text-[11px] text-[#6f7b75]">{reportTitle}</div>
+                    <StageHeader icon={<ScanSearch className="h-3.5 w-3.5" />} title={stagedFlow.intent.title} />
+                    <div className="rounded-[14px] border border-[#e5e7eb] bg-[#fafafa] px-4 py-4">
+                      <StageParagraph>{stagedFlow.intent.body}</StageParagraph>
+                    </div>
+                  </div>
+
+                  <div>
+                    <StageHeader icon={<Workflow className="h-3.5 w-3.5" />} title={stagedFlow.split.title} />
+                    <div className="rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-4 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
+                      <div className="space-y-2 text-[12px] leading-6 text-[#5e6763]">
+                        {stagedFlow.split.splitItems?.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <StageHeader icon={<Sparkles className="h-3.5 w-3.5" />} title={stagedFlow.execution.title} />
+                    <div className="space-y-4">
+                      {stagedFlow.execution.groups?.map((group) => (
+                        <div key={group.title} className="space-y-3">
+                          <div className="text-[13px] font-semibold text-[#202124]">{group.title} ^</div>
+                          {group.body ? <StageParagraph>{group.body}</StageParagraph> : null}
+                          {group.tools?.map((tool) => (
+                            <div
+                              key={`${group.title}-${tool.detail}`}
+                              className="rounded-[12px] border border-[#eceef1] bg-white px-3 py-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.04)]"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 text-[12px] font-medium text-[#3f4542]">
+                                  <div className="flex h-5 w-5 items-center justify-center rounded-full border border-[#e5e7eb] bg-[#fafafa]">
+                                    <FileText className="h-3 w-3" />
+                                  </div>
+                                  调用工具
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openToolView(tool.detail)}
+                                  aria-label={getToolViewLabel(tool.detail, tabs)}
+                                  className={`rounded-[8px] border px-2 py-0.5 text-[11px] font-medium ${
+                                    activeTabLabel === tabs[3] && tool.detail.includes("关键词")
+                                      ? "border-[#171717] bg-[#171717] text-white"
+                                      : activeTabLabel === tabs[2] && (tool.detail.includes("ASIN") || tool.detail.includes("五点描述") || tool.detail.includes("标题"))
+                                        ? "border-[#171717] bg-[#171717] text-white"
+                                        : activeTabLabel === tabs[1] && (tool.detail.includes("写作要求") || tool.detail.includes("算法") || tool.detail.includes("FABE"))
+                                          ? "border-[#171717] bg-[#171717] text-white"
+                                          : "border-[#e5e7eb] bg-[#fafafa] text-[#3a403d]"
+                                  }`}
+                                >
+                                  查看
+                                </button>
+                              </div>
+                              <div className="mt-2 text-[11px] leading-5 text-[#6c7571]">{tool.detail}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <StageHeader icon={<FileText className="h-3.5 w-3.5" />} title={stagedFlow.result.title} />
+                    <div className="mb-3 rounded-[12px] border border-[#d8ebe2] bg-[linear-gradient(180deg,#f6fffb,#eff9f4)] px-3 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[#16a34a] text-white">
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="text-[13px] font-medium text-[#24322b]">任务执行结果</div>
+                            <div className="text-[11px] text-[#6f7b75]">{reportTitle}</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={openReportView}
+                          className="rounded-[8px] border border-[#e5e7eb] bg-white px-2 py-1 text-[11px] font-medium text-[#303734]"
+                        >
+                          查看
+                        </button>
+                      </div>
+                    </div>
+
+                    <StageParagraph>{stagedFlow.result.body}</StageParagraph>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="rounded-[8px] border border-[#e5e7eb] bg-white px-2 py-1 text-[11px] font-medium text-[#303734]"
-                >
-                  查看
-                </button>
               </div>
             </div>
-
-            <p className="text-[12px] leading-6 text-[#262c29]">
-              {summary}
-            </p>
           </div>
+
         </aside>
 
-        <main className="relative min-w-0 bg-white">
+        <main className="relative min-w-0 overflow-hidden bg-white" data-testid="share-result-reader">
           <div className="flex h-12 items-center justify-between border-b border-[#e5e7eb] px-5">
             <div className="flex items-center gap-2">
               <div className="flex h-5 w-5 items-center justify-center rounded-[4px] bg-[#171717] text-white">
                 <FileText className="h-3 w-3" />
               </div>
-              <div className="text-[14px] font-semibold text-[#1f2421]">任务执行结果</div>
+              <div className="text-[14px] font-semibold text-[#1f2421]">{activeTabLabel}</div>
               <div className="text-[11px] text-[#8b9490]">最后生成时间：{generatedAt.slice(0, 10)}</div>
             </div>
             <div className="flex items-center gap-3 text-[#6f7773]">
@@ -285,7 +442,7 @@ export function ShareReplayPage({ shareId }: ShareReplayPageProps) {
             </div>
           </div>
 
-          <div className="min-h-0 overflow-auto">
+          <div ref={mainScrollerRef} className="min-h-0 overflow-auto">
             <div className="grid min-w-[900px] grid-cols-[44px_repeat(4,minmax(0,1fr))] border-b border-[#e5e7eb] text-center text-[11px] text-[#737b77]">
               <div className="border-r border-[#e5e7eb] bg-[#f8fafc] py-2" />
               {["A", "B", "C", "D"].map((label) => (
@@ -306,59 +463,86 @@ export function ShareReplayPage({ shareId }: ShareReplayPageProps) {
 
               <div>
                 <div className="border-b border-[#e5e7eb] bg-[linear-gradient(90deg,#18181b,#27272a)] px-6 py-8 text-center text-white">
-                  <div className="text-[16px] font-semibold md:text-[22px]">{reportTitle}</div>
-                  <div className="mt-3 text-[11px] text-white/90 md:text-[13px]">{reportSubtitle}</div>
+                  <div className="text-[16px] font-semibold md:text-[22px]">{activeTab === 1 ? "Listing 文案建议" : reportTitle}</div>
+                  <div className="mt-3 text-[11px] text-white/90 md:text-[13px]">
+                    {activeTab === 1 ? "基于竞品、关键词和写作理论整理出的文案方向。" : reportSubtitle}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-4 border-b border-[#edf1ef] bg-white text-[12px] font-medium text-[#313734]">
-                  {reportColumns.map((cell, index) => (
-                    <div key={`${cell}-${index}`} className="border-r border-[#e5e7eb] px-3 py-3 last:border-r-0">
-                      {cell}
+                {activeTab === 1 ? (
+                  <div className="space-y-5 bg-white px-6 py-6 text-[13px] leading-7 text-[#39403c]">
+                    <div className="rounded-[14px] border border-[#e5e7eb] bg-[#fafafa] px-4 py-4">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7a8380]">推荐标题结构</div>
+                      <div className="mt-3 text-[15px] font-medium text-[#1f2421]">
+                        40 oz Leakproof Tumbler with Handle, Flip Straw Lid, Vacuum Insulated Stainless Steel Cup for Daily Hydration
+                      </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {[
+                        "先强调 Leakproof 和 Straw Lid，优先回应评论里的防漏焦虑。",
+                        "材质和保冷能力放在前两条卖点里，减少高客单用户的犹豫。",
+                        "兼容场景和随身携带体验放在中段，适合做主图与五点联动。",
+                        "避免直接复刻竞品品牌词，把高价值通用词埋入标题和五点描述。",
+                      ].map((point) => (
+                        <div key={point} className="rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
+                          {point}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-4 border-b border-[#edf1ef] bg-white text-[12px] font-medium text-[#313734]">
+                      {reportColumns.map((cell, index) => (
+                        <div key={`${cell}-${index}`} className="border-r border-[#e5e7eb] px-3 py-3 last:border-r-0">
+                          {cell}
+                        </div>
+                      ))}
+                    </div>
 
-                {reportRows.map((row, rowIndex) => (
-                  <div key={rowIndex} className="grid grid-cols-4 border-b border-[#e5e7eb] text-[12px] text-[#444b47]">
-                    <div className="min-h-[66px] border-r border-[#e5e7eb] px-3 py-3 leading-5">
-                      <div className="flex items-start gap-3">
-                        <div className={`h-14 w-10 shrink-0 rounded-[10px] bg-gradient-to-b ${row.tint} shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]`} />
-                        <div className="min-w-0">
-                          <div className="font-medium text-[#414744]">{row.title}</div>
-                          <div className="mt-1 text-[10px] text-[#9aa39e]">ASIN: {row.asin}</div>
+                    {reportRows.map((row, rowIndex) => (
+                      <div key={rowIndex} className="grid grid-cols-4 border-b border-[#e5e7eb] text-[12px] text-[#444b47]">
+                        <div className="min-h-[66px] border-r border-[#e5e7eb] px-3 py-3 leading-5">
+                          <div className="flex items-start gap-3">
+                            <div className={`h-14 w-10 shrink-0 rounded-[10px] bg-gradient-to-b ${row.tint} shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]`} />
+                            <div className="min-w-0">
+                              <div className="font-medium text-[#414744]">{row.title}</div>
+                              <div className="mt-1 text-[10px] text-[#9aa39e]">ASIN: {row.asin}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="min-h-[66px] border-r border-[#e5e7eb] px-3 py-3 leading-6">{row.price}</div>
+                        <div className="min-h-[66px] border-r border-[#e5e7eb] px-3 py-3 leading-6">{row.rating}</div>
+                        <div className="min-h-[66px] px-3 py-3 leading-5">
+                          {row.points.map((point) => (
+                            <div key={point}>{point}</div>
+                          ))}
+                          <div className="mt-1 text-[10px] text-[#7e8782]">(来源: [亚马逊前端商品详情模拟])</div>
                         </div>
                       </div>
-                    </div>
-                    <div className="min-h-[66px] border-r border-[#e5e7eb] px-3 py-3 leading-6">{row.price}</div>
-                    <div className="min-h-[66px] border-r border-[#e5e7eb] px-3 py-3 leading-6">{row.rating}</div>
-                    <div className="min-h-[66px] px-3 py-3 leading-5">
-                      {row.points.map((point) => (
-                        <div key={point}>{point}</div>
-                      ))}
-                      <div className="mt-1 text-[10px] text-[#7e8782]">(来源: [亚马逊前端商品详情模拟])</div>
-                    </div>
-                  </div>
-                ))}
+                    ))}
 
-                <div className="border-b border-[#e5e7eb] bg-white px-3 py-3 text-[12px] font-semibold text-[#39403c]">
-                  高价值关键词挖掘 (Top 10)
-                </div>
-                <div className="grid grid-cols-4 border-b border-[#edf1ef] bg-white text-[12px] font-medium text-[#313734]">
-                  {keywordColumns.map((cell, index) => (
-                    <div key={`${cell}-${index}`} className="border-r border-[#e5e7eb] px-3 py-3 last:border-r-0">
-                      {cell}
+                    <div className="border-b border-[#e5e7eb] bg-white px-3 py-3 text-[12px] font-semibold text-[#39403c]">
+                      {activeTab === 3 ? "关键词趋势与竞争摘要" : "高价值关键词挖掘 (Top 10)"}
                     </div>
-                  ))}
-                </div>
-                {keywordRows.map((row, rowIndex) => (
-                  <div key={`keyword-${rowIndex}`} className="grid grid-cols-4 border-b border-[#e5e7eb] text-[12px] text-[#444b47]">
-                    {row.map((cell, cellIndex) => (
-                      <div key={`${cell}-${cellIndex}`} className="min-h-[44px] border-r border-[#e5e7eb] px-3 py-3 last:border-r-0">
-                        {cell}
+                    <div className="grid grid-cols-4 border-b border-[#edf1ef] bg-white text-[12px] font-medium text-[#313734]">
+                      {keywordColumns.map((cell, index) => (
+                        <div key={`${cell}-${index}`} className="border-r border-[#e5e7eb] px-3 py-3 last:border-r-0">
+                          {cell}
+                        </div>
+                      ))}
+                    </div>
+                    {keywordRows.map((row, rowIndex) => (
+                      <div key={`keyword-${rowIndex}`} className="grid grid-cols-4 border-b border-[#e5e7eb] text-[12px] text-[#444b47]">
+                        {row.map((cell, cellIndex) => (
+                          <div key={`${cell}-${cellIndex}`} className="min-h-[44px] border-r border-[#e5e7eb] px-3 py-3 last:border-r-0">
+                            {cell}
+                          </div>
+                        ))}
                       </div>
                     ))}
-                  </div>
-                ))}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -370,7 +554,8 @@ export function ShareReplayPage({ shareId }: ShareReplayPageProps) {
                   <button
                     key={tab}
                     type="button"
-                    className={index === 0 ? "font-medium text-[#171717]" : "text-[#6f7773]"}
+                    onClick={() => selectTab(index)}
+                    className={index === activeTab ? "font-medium text-[#171717]" : "text-[#6f7773]"}
                   >
                     {tab}
                   </button>

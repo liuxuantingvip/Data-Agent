@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
 
 import { InlineNotice } from "@/components/inline-notice";
 import { MoreDataShell } from "@/components/more-data-shell";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,16 @@ export function TemplatesWorkspace() {
 
   const selectedId = searchParams.get("templateId") ?? filteredCards[0]?.id;
   const selectedTemplate = filteredCards.find((item) => item.id === selectedId) ?? filteredCards[0];
+
+  useEffect(() => {
+    if (!searchParams.get("templateId")) return;
+    if (selectedTemplate) return;
+    if (filteredCards[0]) {
+      router.push(`/templates?templateId=${filteredCards[0].id}`);
+      return;
+    }
+    router.push("/templates");
+  }, [filteredCards, router, searchParams, selectedTemplate]);
 
   const createFromCurrentRun = () => {
     const templateId = demoActions.saveTemplateFromRun(currentRunId);
@@ -117,26 +127,35 @@ export function TemplatesWorkspace() {
           {notice ? <div className="mt-6"><InlineNotice message={notice} /></div> : null}
 
           <div className="mt-8 grid max-w-[720px] gap-4">
-            {filteredCards.map((card) => {
-              const active = card.id === selectedTemplate?.id;
-              return (
-                <button
-                  key={card.id}
-                  onClick={() => router.push(`/templates?templateId=${card.id}`)}
-                  className="w-full text-left"
-                >
-                  <Card className={active ? "overflow-hidden border-[#d4d4d8]" : "overflow-hidden border-[#e5e7eb]"}>
-                    <div className="min-h-[120px] bg-[#fafafa] px-4 py-4 text-[13px] leading-7 text-[#71717a]">
-                      {card.summary || card.body}
-                    </div>
-                    <CardContent className="border-t border-[#e5e7eb] px-4 py-4">
-                      <div className="font-medium text-[#18181b]">{card.title}</div>
-                      <div className="mt-2 text-sm text-[#a1a1aa]">{card.createdAt}</div>
-                    </CardContent>
-                  </Card>
-                </button>
-              );
-            })}
+            {filteredCards.length > 0 ? (
+              filteredCards.map((card) => {
+                const active = card.id === selectedTemplate?.id;
+                return (
+                  <button
+                    key={card.id}
+                    onClick={() => router.push(`/templates?templateId=${card.id}`)}
+                    className="w-full text-left"
+                  >
+                    <Card className={active ? "overflow-hidden border-[#d4d4d8]" : "overflow-hidden border-[#e5e7eb]"}>
+                      <div className="min-h-[120px] bg-[#fafafa] px-4 py-4 text-[13px] leading-7 text-[#71717a]">
+                        {card.summary || card.body}
+                      </div>
+                      <CardContent className="border-t border-[#e5e7eb] px-4 py-4">
+                        <div className="font-medium text-[#18181b]">{card.title}</div>
+                        <div className="mt-2 text-sm text-[#a1a1aa]">{card.createdAt}</div>
+                      </CardContent>
+                    </Card>
+                  </button>
+                );
+              })
+            ) : (
+              <Card className="overflow-hidden border-dashed border-[#d4d4d8] bg-[#fafafa]">
+                <CardContent className="px-5 py-8">
+                  <div className="text-[15px] font-medium text-[#18181b]">当前筛选下没有匹配的任务指令</div>
+                  <p className="mt-2 text-sm leading-6 text-[#71717a]">可以调整关键词、切换分组，或直接新建一条任务指令。</p>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="mt-6 flex items-center gap-3">
@@ -164,7 +183,10 @@ export function TemplatesWorkspace() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-[540px] rounded-[18px] border-[#e5e7eb] p-0">
           <div className="px-8 pb-8 pt-7">
-            <div className="text-[18px] font-semibold text-[#18181b]">保存提示词</div>
+            <DialogTitle className="text-[18px] font-semibold text-[#18181b]">保存提示词</DialogTitle>
+            <DialogDescription className="mt-2 text-sm leading-6 text-[#71717a]">
+              保存当前提示词后，可继续复用、发起任务或转成定时任务。
+            </DialogDescription>
 
             <div className="mt-6 space-y-5">
               <div className="space-y-2">

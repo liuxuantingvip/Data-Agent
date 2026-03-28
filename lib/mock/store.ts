@@ -2,8 +2,14 @@
 
 import { useSyncExternalStore } from "react";
 
+import type {
+  AgentAttachment,
+  AgentRoundRuntimeEvent,
+  ConversationNode,
+  DataSourceChain,
+} from "@/lib/agent-events";
+import { upsertReportCollection, upsertRunCollection } from "@/lib/mock/upsert-run";
 import {
-  conversationSections,
   favoriteItems,
   homeCapabilityItems,
   previewResults,
@@ -12,7 +18,6 @@ import {
   runRecords,
   scheduleItems,
   workspaceName,
-  type ConversationSection,
   type FavoriteItem,
   type PromptCard,
   type ResultPreview,
@@ -36,20 +41,24 @@ export type TaskRun = {
   objective: string;
   mode: "专业模式" | "轻量模式";
   selectedCapabilities: string[];
-  status: "running" | "success";
+  status: "queued" | "running" | "success" | "error";
   startedAt: string;
-  sections: ConversationSection[];
+  sections: Array<{ id: string; title: string; body: string; tools: Array<{ id: string; title: string; detail: string; resultCount: string; previewId: string }> }>;
   notes: string[];
   activePreviewId: string;
   summaryTitle: string;
   summaryBody: string;
   saved: boolean;
   starred: boolean;
+  latestRoundId: string | null;
+  timeline: ConversationNode[];
+  chains: DataSourceChain[];
 };
 
 export type Report = ResultPreview & {
   runId: string;
   generatedAt: string;
+  previewKey: string;
 };
 
 export type Template = PromptCard & {
@@ -84,7 +93,13 @@ type DemoState = {
   currentRunId: string;
 };
 
-const previewCatalog = previewResults.map((preview) => preview.id);
+export type QueueFollowupInput = {
+  prompt: string;
+  selectedCapabilities: string[];
+  attachments: AgentAttachment[];
+};
+
+const capabilityLabelMap = new Map(homeCapabilityItems.map((item) => [item.id, item.label]));
 
 function createId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
@@ -121,74 +136,136 @@ function toCapabilityIds(objective: string) {
     .map((item) => item.id);
 }
 
-function buildSummaryLines(objective: string, note?: string) {
-  const short = toRunTitle(objective);
-  const lines = [
-    `围绕“${short}”的任务目标，系统已整合市场需求、竞品结构和评论信号，形成可直接继续行动的研究结论。`,
-    "当前报告保留了高价值的市场变化、评论痛点和竞争概览，便于继续追问或转为周期性监控。",
-    "建议下一步围绕更具体的型号词、价格带或重点平台继续深挖，以缩小决策范围。",
-  ];
-  if (note) {
-    lines.unshift(`已根据补充要求“${note}”追加一轮细化分析，并同步更新本次报告重点。`);
-  }
-  return lines;
+function getSourceLabel(sourceId: string) {
+  return capabilityLabelMap.get(sourceId) ?? sourceId;
 }
 
-function buildSummaryBody(objective: string, note?: string) {
-  const short = toRunTitle(objective);
-  const suffix = note
-    ? `最新一轮补充要求为“${note}”，已将相关变化写入结果摘要。`
-    : "当前结果适合进一步转成模板或定时任务。";
-  return `任务“${short}”已完成 mock 执行编排，系统整理了市场、评论和竞争三类信息，并生成统一结果视图。${suffix}`;
+function pickPreviewKey(sourceId: string, index = 0) {
+  if (["amazon", "keepa", "store-scan", "walmart", "ebay"].includes(sourceId)) return "market-report";
+  if (["jimu", "seller-sprite", "google"].includes(sourceId)) return "review-report";
+  if (["web-search", "alibaba", "tiktok", "patent"].includes(sourceId)) return "competition-report";
+  return previewResults[index % previewResults.length]?.id ?? "market-report";
 }
 
-function buildSections(objective: string, note?: string): ConversationSection[] {
+function clonePreviewByKey(previewKey: string) {
+  const preview = previewResults.find((item) => item.id === previewKey) ?? previewResults[0];
+  return {
+    ...preview,
+    summary: [...preview.summary],
+    sheetRows: preview.sheetRows.map((row) => [...row]),
+    sheetTabs: preview.sheetTabs.map((tab) => ({ ...tab })),
+  };
+}
+
+function buildSummaryBody(
+  objective: string,
+  sourceLabels: string[],
+  note?: string,
+  attachments?: AgentAttachment[],
+) {
   const short = toRunTitle(objective);
-  const sections = conversationSections.map((section, index) => {
-    if (index === 0) {
-      return {
-        ...section,
-        body: `我将围绕“${short}”优先抓取市场需求与竞争变化，确认这轮任务的核心判断。`,
-      };
-    }
+  const sourceText =
+    sourceLabels.length > 0 ? `系统已并行调度 ${sourceLabels.join("、")} 多条数据源链。` : "系统已完成基础数据源链调度。";
+  const attachmentText =
+    attachments && attachments.length > 0 ? `并纳入附件上下文 ${attachments.map((item) => item.name).join("、")}。` : "";
+  const tail = note ? `最新补充要求为“${note}”，本轮结果已完成同步刷新。` : "当前结果适合继续追问、保存模板或转为周期任务。";
+  return `任务“${short}”已完成多逻辑链执行。${sourceText}${attachmentText}${tail}`;
+}
 
-    if (index === 1) {
-      return {
-        ...section,
-        body: `接下来补评论与用户反馈，判断“${short}”对应方向的真实需求和常见痛点。`,
-      };
-    }
+function buildAssistantFinalText(
+  objective: string,
+  sourceLabels: string[],
+  note?: string,
+  attachments?: AgentAttachment[],
+) {
+  const opening = note ? `已根据“${note}”补充分析。` : `围绕“${toRunTitle(objective)}”的首轮分析已完成。`;
+  const sourceSentence =
+    sourceLabels.length > 0
+      ? `本轮主要整合了 ${sourceLabels.join("、")} 的结果，并在同一轮里完成交叉比对。`
+      : "本轮基于默认数据源链给出了一版基础结果。";
+  const attachmentSentence =
+    attachments && attachments.length > 0
+      ? `我也参考了附件 ${attachments.map((item) => item.name).join("、")} 的上下文，不是只看页面内文本。`
+      : "当前输出已经包含市场、评论和竞争三个层面的综合判断。";
+  return [opening, sourceSentence, attachmentSentence].join("\n\n");
+}
 
-    return {
-      ...section,
-      body: `最后补竞品数量与供需概览，帮助您评估“${short}”是否适合继续推进。`,
-    };
+function createNode<T extends ConversationNode>(node: T): T {
+  return node;
+}
+
+function createUserNode(roundId: string, text: string, createdAt: string) {
+  return createNode({
+    id: createId("node"),
+    roundId,
+    createdAt,
+    kind: "user_message",
+    text,
   });
-
-  if (!note) return sections;
-
-  const nextPreview = previewCatalog[(previewCatalog.indexOf("market-report") + 1) % previewCatalog.length];
-  return [
-    ...sections,
-    {
-      id: createId("section"),
-      title: `补充执行：${toRunTitle(note)}`,
-      body: `已根据您的补充要求“${note}”继续细化任务，并将新的判断写入报告摘要和右侧结果预览。`,
-      tools: [
-        {
-          id: createId("tool"),
-          title: "继续执行",
-          detail: `补充约束“${note}”，重新整理结果重点与建议动作。`,
-          resultCount: "新增 1 组结果",
-          previewId: nextPreview,
-        },
-      ],
-    },
-  ];
 }
 
-function buildReport(runId: string, objective: string, note?: string): Report {
-  const base = previewResults[0];
+function createAttachmentNode(roundId: string, attachments: AgentAttachment[], createdAt: string) {
+  return createNode({
+    id: createId("node"),
+    roundId,
+    createdAt,
+    kind: "attachment_group",
+    attachments,
+  });
+}
+
+function createSeedTimeline(
+  objective: string,
+  sources: string[],
+  report: Report,
+  roundId: string,
+) {
+  const createdAt = report.generatedAt;
+  const sourceLabels = sources.map(getSourceLabel);
+  const chains: DataSourceChain[] = sources.map((sourceId, index) => ({
+    id: createId("chain"),
+    roundId,
+    sourceId,
+    sourceLabel: getSourceLabel(sourceId),
+    status: "success",
+    intent: `围绕“${toRunTitle(objective)}”查询 ${getSourceLabel(sourceId)} 的结构化结果。`,
+    progressText: `已完成 ${getSourceLabel(sourceId)} 数据查询与整理。`,
+    resultCountText: index === 0 ? "返回 50 条数据" : index === 1 ? "返回 60 条数据" : "返回 1 组结果",
+    resultPreviewId: pickPreviewKey(sourceId, index),
+  }));
+
+  const timeline: ConversationNode[] = [
+    createUserNode(roundId, objective, createdAt),
+    ...chains.map((chain) =>
+      createNode({
+        id: createId("node"),
+        roundId,
+        createdAt,
+        kind: "data_source_chain",
+        chainId: chain.id,
+      }),
+    ),
+    createNode({
+      id: createId("node"),
+      roundId,
+      createdAt,
+      kind: "assistant_final",
+      text: buildAssistantFinalText(objective, sourceLabels),
+    }),
+    createNode({
+      id: createId("node"),
+      roundId,
+      createdAt,
+      kind: "report_patch",
+      summary: [...report.summary],
+    }),
+  ];
+
+  return { timeline, chains };
+}
+
+function buildReport(runId: string, objective: string, previewKey = "market-report"): Report {
+  const base = clonePreviewByKey(previewKey);
   return {
     ...base,
     id: createId("report"),
@@ -196,9 +273,7 @@ function buildReport(runId: string, objective: string, note?: string): Report {
     title: toRunTitle(objective),
     subtitle: `最后生成时间：${formatShortDate()} · ${objective.slice(0, 26)}`,
     generatedAt: formatDate(),
-    summary: buildSummaryLines(objective, note),
-    sheetRows: [...base.sheetRows],
-    sheetTabs: [...base.sheetTabs],
+    previewKey,
   };
 }
 
@@ -223,17 +298,15 @@ function buildRunRecord(run: TaskRun, report: Report): RunRecordEntry {
     title: run.title,
     startedAt: run.startedAt,
     result: `生成 1 份${report.mode === "sheet" ? "结构化表格" : "结构化报告"}`,
-    status: "成功",
+    status: run.status === "error" ? "失败" : "成功",
   };
 }
 
-function buildRunFromObjective(
-  objective: string,
-  mode: TaskDraft["mode"],
-  selectedCapabilities: string[],
-) {
+function buildRunFromObjective(objective: string, mode: TaskDraft["mode"], selectedCapabilities: string[]) {
+  const startedAt = formatDate();
   const taskDraftId = createId("task");
   const runId = createId("run");
+  const roundId = createId("round");
   const title = toRunTitle(objective);
   const report = buildReport(runId, objective);
   const run: TaskRun = {
@@ -244,119 +317,303 @@ function buildRunFromObjective(
     objective,
     mode,
     selectedCapabilities,
-    status: "success",
-    startedAt: formatDate(),
-    sections: buildSections(objective),
+    status: "queued",
+    startedAt,
+    sections: [],
     notes: [],
-    activePreviewId: "market-report",
+    activePreviewId: report.previewKey,
     summaryTitle: resultSummaryTitle,
-    summaryBody: buildSummaryBody(objective),
+    summaryBody: "任务已创建，等待开始执行多逻辑链分析。",
     saved: false,
     starred: false,
+    latestRoundId: roundId,
+    timeline: [createUserNode(roundId, objective, startedAt)],
+    chains: [],
   };
   const taskDraft: TaskDraft = {
     id: taskDraftId,
     objective,
     mode,
     selectedCapabilities,
-    createdAt: run.startedAt,
+    createdAt: startedAt,
   };
   return { taskDraft, run, report };
+}
+
+function buildSeedRun(args: {
+  runId: string;
+  taskDraftId: string;
+  objective: string;
+  mode: TaskDraft["mode"];
+  selectedCapabilities: string[];
+  startedAt: string;
+  saved: boolean;
+}) {
+  const report = {
+    ...buildReport(args.runId, args.objective),
+    id: `report-${args.runId}`,
+    runId: args.runId,
+    generatedAt: args.startedAt,
+    subtitle: `最后生成时间：${args.startedAt.slice(0, 10)} · ${args.objective.slice(0, 26)}`,
+  };
+  const roundId = `round-${args.runId}`;
+  const { timeline, chains } = createSeedTimeline(args.objective, args.selectedCapabilities, report, roundId);
+  const run: TaskRun = {
+    id: args.runId,
+    taskDraftId: args.taskDraftId,
+    reportId: report.id,
+    title: toRunTitle(args.objective),
+    objective: args.objective,
+    mode: args.mode,
+    selectedCapabilities: args.selectedCapabilities,
+    status: "success",
+    startedAt: args.startedAt,
+    sections: [],
+    notes: [],
+    activePreviewId: report.previewKey,
+    summaryTitle: resultSummaryTitle,
+    summaryBody: buildSummaryBody(args.objective, args.selectedCapabilities.map(getSourceLabel)),
+    saved: args.saved,
+    starred: false,
+    latestRoundId: roundId,
+    timeline,
+    chains,
+  };
+  return { run, report };
+}
+
+function updateAttachmentStatuses(nodes: ConversationNode[], roundId: string, attachments: AgentAttachment[]) {
+  return nodes.map((node) =>
+    node.kind === "attachment_group" && node.roundId === roundId
+      ? { ...node, attachments }
+      : node,
+  );
+}
+
+function upsertTimelineNode(
+  timeline: ConversationNode[],
+  matcher: (node: ConversationNode) => boolean,
+  createNodeValue: () => ConversationNode,
+  updateNode: (node: ConversationNode) => ConversationNode,
+) {
+  const index = timeline.findIndex(matcher);
+  if (index === -1) return [...timeline, createNodeValue()];
+  return timeline.map((node, nodeIndex) => (nodeIndex === index ? updateNode(node) : node));
+}
+
+function applyEventToRun(run: TaskRun, report: Report, event: AgentRoundRuntimeEvent) {
+  const timeline = [...run.timeline];
+  const chains = [...run.chains];
+  const nextRun = { ...run };
+  let nextReport = { ...report };
+
+  if (event.type === "round_started") {
+    nextRun.status = "running";
+  }
+
+  if (event.type === "attachments_received") {
+    nextRun.timeline = updateAttachmentStatuses(timeline, event.roundId, event.attachments);
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "thinking") {
+    nextRun.timeline = upsertTimelineNode(
+      timeline,
+      (node) => node.kind === "assistant_thinking" && node.roundId === event.roundId,
+      () =>
+        createNode({
+          id: createId("node"),
+          roundId: event.roundId,
+          createdAt: formatDate(),
+          kind: "assistant_thinking",
+          text: event.text,
+        }),
+      (node) => ({ ...node, text: event.text }),
+    );
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "loading") {
+    nextRun.timeline = upsertTimelineNode(
+      timeline,
+      (node) => node.kind === "assistant_loading" && node.roundId === event.roundId,
+      () =>
+        createNode({
+          id: createId("node"),
+          roundId: event.roundId,
+          createdAt: formatDate(),
+          kind: "assistant_loading",
+          text: event.text,
+        }),
+      (node) => ({ ...node, text: event.text }),
+    );
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "source_started") {
+    nextRun.chains = [...chains, event.chain];
+    nextRun.timeline = [
+      ...timeline.filter((node) => !(node.roundId === event.roundId && node.kind === "assistant_loading")),
+      createNode({
+        id: createId("node"),
+        roundId: event.roundId,
+        createdAt: formatDate(),
+        kind: "data_source_chain",
+        chainId: event.chain.id,
+      }),
+    ];
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "source_progress") {
+    nextRun.chains = chains.map((chain) =>
+      chain.id === event.chainId ? { ...chain, status: "running", progressText: event.progressText } : chain,
+    );
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "source_completed") {
+    nextRun.chains = chains.map((chain) =>
+      chain.id === event.chainId
+        ? {
+            ...chain,
+            status: "success",
+            progressText: event.progressText,
+            resultCountText: event.resultCountText,
+            resultPreviewId: event.resultPreviewId ?? chain.resultPreviewId,
+          }
+        : chain,
+    );
+    if (event.resultPreviewId) {
+      nextRun.activePreviewId = event.resultPreviewId;
+    }
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "delta") {
+    nextRun.timeline = upsertTimelineNode(
+      timeline,
+      (node) => node.kind === "assistant_stream" && node.roundId === event.roundId,
+      () =>
+        createNode({
+          id: createId("node"),
+          roundId: event.roundId,
+          createdAt: formatDate(),
+          kind: "assistant_stream",
+          text: event.text,
+          status: "streaming",
+        }),
+      (node) =>
+        node.kind === "assistant_stream"
+          ? { ...node, text: `${node.text}${event.text}` }
+          : node,
+    );
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "final") {
+    nextRun.timeline = timeline.map((node) =>
+      node.kind === "assistant_stream" && node.roundId === event.roundId
+        ? { ...node, status: "complete" as const }
+        : node,
+    );
+    nextRun.timeline = [
+      ...nextRun.timeline,
+      createNode({
+        id: createId("node"),
+        roundId: event.roundId,
+        createdAt: formatDate(),
+        kind: "assistant_final",
+        text: event.text,
+      }),
+    ];
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "report_updated") {
+    nextReport = {
+      ...nextReport,
+      previewKey: event.patch.previewKey,
+      title: event.patch.title,
+      subtitle: event.patch.subtitle,
+      generatedAt: event.patch.generatedAt,
+      mode: event.patch.mode,
+      summary: [...event.patch.summary],
+      sheetTabs: event.patch.sheetTabs.map((tab) => ({ ...tab })),
+      sheetRows: event.patch.sheetRows.map((row) => [...row]),
+    };
+    nextRun.summaryBody = event.patch.summaryBody;
+    nextRun.activePreviewId = event.patch.previewKey;
+    nextRun.timeline = [
+      ...timeline,
+      createNode({
+        id: createId("node"),
+        roundId: event.roundId,
+        createdAt: formatDate(),
+        kind: "report_patch",
+        summary: [...event.patch.summary],
+      }),
+    ];
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "round_completed") {
+    nextRun.status = "success";
+    return { run: nextRun, report: nextReport };
+  }
+
+  if (event.type === "error") {
+    nextRun.status = "error";
+    nextRun.timeline = [
+      ...timeline,
+      createNode({
+        id: createId("node"),
+        roundId: event.roundId,
+        createdAt: formatDate(),
+        kind: "error",
+        message: event.message,
+      }),
+    ];
+    return { run: nextRun, report: nextReport };
+  }
+
+  return { run: nextRun, report: nextReport };
 }
 
 function createInitialState(): DemoState {
   const objective =
     "请帮我做一份美国站 keyboard tablet case 赛道调研，输出 3 个值得切入的机会方向，并说明需求信号、竞争强度和下一步建议。";
   const secondaryObjective = "监控关键词并分析";
-  const taskDraft: TaskDraft = {
-    id: "task-default",
+
+  const defaultSeed = buildSeedRun({
+    runId: "run-default",
+    taskDraftId: "task-default",
     objective,
     mode: "专业模式",
     selectedCapabilities: ["amazon", "jimu", "web-search"],
-    createdAt: "2026-03-24 10:00:00",
-  };
-  const report: Report = {
-    ...previewResults[0],
-    id: "report-default",
-    runId: "run-default",
-    title: "美国站 keyboard tablet case 赛道调研",
-    subtitle: "最后生成时间：2026-03-24 · 美国站 keyboard tablet case 赛道调研",
-    generatedAt: "2026-03-24 10:08:00",
-    summary: buildSummaryLines(objective),
-    sheetRows: [...previewResults[0].sheetRows],
-    sheetTabs: [...previewResults[0].sheetTabs],
-  };
-  const initialRun: TaskRun = {
-    id: "run-default",
-    taskDraftId: taskDraft.id,
-    reportId: report.id,
-    title: report.title,
-    objective,
-    mode: taskDraft.mode,
-    selectedCapabilities: taskDraft.selectedCapabilities,
-    status: "success",
-    startedAt: taskDraft.createdAt,
-    sections: buildSections(objective),
-    notes: [],
-    activePreviewId: "market-report",
-    summaryTitle: resultSummaryTitle,
-    summaryBody: buildSummaryBody(objective),
+    startedAt: "2026-03-24 10:00:00",
     saved: true,
-    starred: false,
-  };
-  const secondaryReport: Report = {
-    ...previewResults[0],
-    id: "report-secondary",
+  });
+  const secondarySeed = buildSeedRun({
     runId: "run-secondary",
-    title: secondaryObjective,
-    subtitle: `最后生成时间：2026-03-25 · ${secondaryObjective}`,
-    generatedAt: "2026-03-25 14:18:00",
-    summary: buildSummaryLines(secondaryObjective),
-    sheetRows: [...previewResults[0].sheetRows],
-    sheetTabs: [...previewResults[0].sheetTabs],
-  };
-  const secondaryRun: TaskRun = {
-    id: "run-secondary",
     taskDraftId: "task-secondary",
-    reportId: secondaryReport.id,
-    title: secondaryObjective,
     objective: secondaryObjective,
     mode: "专业模式",
     selectedCapabilities: ["seller-sprite", "google", "web-search"],
-    status: "success",
     startedAt: "2026-03-25 14:10:00",
-    sections: buildSections(secondaryObjective),
-    notes: [],
-    activePreviewId: "market-report",
-    summaryTitle: resultSummaryTitle,
-    summaryBody: buildSummaryBody(secondaryObjective),
     saved: false,
-    starred: false,
-  };
-  const defaultRecord: RunRecordEntry = {
-    id: "record-default",
-    runId: initialRun.id,
-    reportId: report.id,
-    title: initialRun.title,
-    startedAt: initialRun.startedAt,
-    result: "生成 1 份结构化表格",
-    status: "成功",
-  };
-  const defaultArtifact: Artifact = {
-    id: "artifact-default",
-    title: initialRun.title,
-    body: initialRun.objective,
-    scope: "全部",
-    type: "表格",
-    createdAt: "2026-03-24 10:10:00",
-    sourceRunId: initialRun.id,
-    reportId: report.id,
-  };
+  });
 
   return {
     workspaceName,
     taskDrafts: [
-      taskDraft,
+      {
+        id: "task-default",
+        objective,
+        mode: "专业模式",
+        selectedCapabilities: ["amazon", "jimu", "web-search"],
+        createdAt: "2026-03-24 10:00:00",
+      },
       {
         id: "task-secondary",
         objective: secondaryObjective,
@@ -365,8 +622,8 @@ function createInitialState(): DemoState {
         createdAt: "2026-03-25 14:10:00",
       },
     ],
-    runs: [secondaryRun, initialRun],
-    reports: [secondaryReport, report],
+    runs: [secondarySeed.run, defaultSeed.run],
+    reports: [secondarySeed.report, defaultSeed.report],
     templates: promptCards.map((item) => ({ ...item })),
     workflows: scheduleItems.map((item, index) => ({
       ...item,
@@ -374,24 +631,33 @@ function createInitialState(): DemoState {
       description: "围绕市场变化、评论信号和竞争概览形成一条可复用监控链路。",
     })),
     artifacts: [
-      defaultArtifact,
+      {
+        id: "artifact-default",
+        title: defaultSeed.run.title,
+        body: defaultSeed.run.objective,
+        scope: "全部",
+        type: "表格",
+        createdAt: "2026-03-24 10:10:00",
+        sourceRunId: defaultSeed.run.id,
+        reportId: defaultSeed.report.id,
+      },
       ...favoriteItems.map((item, index) => ({
         ...item,
         id: `artifact-seed-${index + 1}`,
-        sourceRunId: initialRun.id,
-        reportId: report.id,
+        sourceRunId: defaultSeed.run.id,
+        reportId: defaultSeed.report.id,
       })),
     ],
     runRecords: [
-      defaultRecord,
+      buildRunRecord(defaultSeed.run, defaultSeed.report),
       ...runRecords.map((item, index) => ({
         ...item,
         id: `record-seed-${index + 1}`,
-        runId: initialRun.id,
-        reportId: report.id,
+        runId: defaultSeed.run.id,
+        reportId: defaultSeed.report.id,
       })),
     ],
-    currentRunId: initialRun.id,
+    currentRunId: defaultSeed.run.id,
   };
 }
 
@@ -409,19 +675,6 @@ function emit(nextState: DemoState) {
 
 function updateState(updater: (current: DemoState) => DemoState) {
   emit(updater(state));
-}
-
-function cloneWorkflowFromTemplate(template: Template): Workflow {
-  return {
-    id: createId("workflow"),
-    templateId: template.id,
-    title: `${template.title} · 周期执行`,
-    frequency: "每周一 09:00",
-    nextRun: `${formatShortDate()} 09:00`,
-    status: "运行中",
-    scope: template.scope,
-    description: "按模板持续检查市场变化，并把结果同步为结构化产物。",
-  };
 }
 
 function createTemplateFromInput(input: {
@@ -449,17 +702,16 @@ function createWorkflowFromInput(input: {
   frequency: string;
   nextRun: string;
   scope?: Workflow["scope"];
-  status?: Workflow["status"];
 }): Workflow {
   return {
     id: createId("workflow"),
     templateId: input.templateId,
     title: input.title.trim(),
+    description: input.prompt.trim(),
     frequency: input.frequency,
     nextRun: input.nextRun,
-    status: input.status ?? "运行中",
+    status: "运行中",
     scope: input.scope ?? "默认",
-    description: input.prompt.trim(),
   };
 }
 
@@ -501,6 +753,46 @@ export const demoActions = {
     return run.id;
   },
 
+  queueFollowupRound(runId: string, input: QueueFollowupInput) {
+    const roundId = createId("round");
+    const createdAt = formatDate();
+    updateState((current) => ({
+      ...current,
+      runs: current.runs.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              status: "running",
+              latestRoundId: roundId,
+              notes: [...run.notes, input.prompt],
+              timeline: [
+                ...run.timeline,
+                createUserNode(roundId, input.prompt, createdAt),
+                ...(input.attachments.length > 0
+                  ? [createAttachmentNode(roundId, input.attachments, createdAt)]
+                  : []),
+              ],
+            }
+          : run,
+      ),
+    }));
+    return roundId;
+  },
+
+  applyRuntimeEvent(runId: string, event: AgentRoundRuntimeEvent) {
+    updateState((current) => {
+      const run = current.runs.find((item) => item.id === runId);
+      const report = current.reports.find((item) => item.runId === runId);
+      if (!run || !report) return current;
+      const next = applyEventToRun(run, report, event);
+      return {
+        ...current,
+        runs: upsertRunCollection(current.runs, next.run),
+        reports: upsertReportCollection(current.reports, next.report),
+      };
+    });
+  },
+
   setCurrentRun(runId: string) {
     updateState((current) => ({ ...current, currentRunId: runId }));
   },
@@ -508,66 +800,31 @@ export const demoActions = {
   setActivePreview(runId: string, previewId: string) {
     updateState((current) => ({
       ...current,
-      runs: current.runs.map((run) =>
-        run.id === runId ? { ...run, activePreviewId: previewId } : run,
-      ),
+      runs: current.runs.map((run) => (run.id === runId ? { ...run, activePreviewId: previewId } : run)),
     }));
   },
 
   appendRunFollowup(runId: string, note: string) {
-    const value = note.trim();
-    if (!value) return null;
-
-    let nextReportId = "";
-    updateState((current) => {
-      const targetRun = current.runs.find((run) => run.id === runId);
-      if (!targetRun) return current;
-
-      const nextPreview =
-        previewCatalog[
-          (previewCatalog.indexOf(targetRun.activePreviewId) + 1 + previewCatalog.length) %
-            previewCatalog.length
-        ] ?? "market-report";
-
-      const nextRuns = current.runs.map((run) =>
-        run.id === runId
-          ? {
-              ...run,
-              notes: [...run.notes, value],
-              sections: buildSections(run.objective, value),
-              activePreviewId: nextPreview,
-              summaryBody: buildSummaryBody(run.objective, value),
-            }
-          : run,
-      );
-
-      const nextReports = current.reports.map((report) => {
-        if (report.runId !== runId) return report;
-        nextReportId = report.id;
-        return {
-          ...report,
-          generatedAt: formatDate(),
-          subtitle: `最后生成时间：${formatShortDate()} · 已补充 ${toRunTitle(value)}`,
-          summary: buildSummaryLines(targetRun.objective, value),
-        };
-      });
-
-      return {
-        ...current,
-        runs: nextRuns,
-        reports: nextReports,
-      };
+    return this.queueFollowupRound(runId, {
+      prompt: note.trim(),
+      selectedCapabilities: [],
+      attachments: [],
     });
+  },
 
-    return nextReportId;
+  upsertRunSnapshot(run: TaskRun, report: Report) {
+    updateState((current) => ({
+      ...current,
+      runs: upsertRunCollection(current.runs, run),
+      reports: upsertReportCollection(current.reports, report),
+      currentRunId: run.id,
+    }));
   },
 
   toggleRunStar(runId: string) {
     updateState((current) => ({
       ...current,
-      runs: current.runs.map((run) =>
-        run.id === runId ? { ...run, starred: !run.starred } : run,
-      ),
+      runs: current.runs.map((run) => (run.id === runId ? { ...run, starred: !run.starred } : run)),
     }));
   },
 
@@ -585,9 +842,7 @@ export const demoActions = {
         return {
           ...current,
           artifacts: current.artifacts.filter((artifact) => artifact.sourceRunId !== runId),
-          runs: current.runs.map((item) =>
-            item.id === runId ? { ...item, saved: false } : item,
-          ),
+          runs: current.runs.map((item) => (item.id === runId ? { ...item, saved: false } : item)),
         };
       }
 
@@ -596,9 +851,7 @@ export const demoActions = {
       return {
         ...current,
         artifacts: [artifact, ...current.artifacts],
-        runs: current.runs.map((item) =>
-          item.id === runId ? { ...item, saved: true } : item,
-        ),
+        runs: current.runs.map((item) => (item.id === runId ? { ...item, saved: true } : item)),
       };
     });
 
@@ -608,38 +861,27 @@ export const demoActions = {
   saveTemplateFromRun(runId: string) {
     let templateId = "";
     updateState((current) => {
-      const existing = current.templates.find((template) => template.sourceRunId === runId);
-      if (existing) {
-        templateId = existing.id;
-        return current;
-      }
-
       const run = current.runs.find((item) => item.id === runId);
       if (!run) return current;
-
-      const template: Template = {
-        id: createId("template"),
-        sourceRunId: runId,
+      const template = createTemplateFromInput({
         title: `${run.title} 模板`,
-        body: `${run.objective}\n\n输出结构化报告，包含市场变化、评论痛点和下一步建议。`,
-        scope: "全部",
-        createdAt: formatDate(),
-      };
+        body: run.objective,
+        sourceRunId: run.id,
+        summary: run.summaryBody,
+      });
       templateId = template.id;
-
       return {
         ...current,
         templates: [template, ...current.templates],
       };
     });
-
     return templateId;
   },
 
   createTemplate(input: {
     title: string;
     body: string;
-    scope?: Template["scope"];
+    scope: "全部" | "默认";
     sourceRunId?: string;
     summary?: string;
   }) {
@@ -651,38 +893,13 @@ export const demoActions = {
     return template.id;
   },
 
-  createWorkflowFromTemplate(templateId: string) {
-    let workflowId = "";
-    updateState((current) => {
-      const existing = current.workflows.find((workflow) => workflow.templateId === templateId);
-      if (existing) {
-        workflowId = existing.id;
-        return current;
-      }
-
-      const template = current.templates.find((item) => item.id === templateId);
-      if (!template) return current;
-
-      const workflow = cloneWorkflowFromTemplate(template);
-      workflowId = workflow.id;
-
-      return {
-        ...current,
-        workflows: [workflow, ...current.workflows],
-      };
-    });
-
-    return workflowId;
-  },
-
   createWorkflow(input: {
     templateId: string;
     title: string;
     prompt: string;
     frequency: string;
     nextRun: string;
-    scope?: Workflow["scope"];
-    status?: Workflow["status"];
+    scope: Workflow["scope"];
   }) {
     const workflow = createWorkflowFromInput(input);
     updateState((current) => ({
@@ -690,5 +907,44 @@ export const demoActions = {
       workflows: [workflow, ...current.workflows],
     }));
     return workflow.id;
+  },
+
+  createWorkflowWithTemplate(input: {
+    title: string;
+    prompt: string;
+    frequency: string;
+    nextRun: string;
+    scope: Workflow["scope"];
+  }) {
+    let workflowId = "";
+    let templateId = "";
+
+    updateState((current) => {
+      const template = createTemplateFromInput({
+        title: input.title,
+        body: input.prompt,
+        scope: input.scope,
+        summary: "由定时任务创建流程自动沉淀的任务模板。",
+      });
+      const workflow = createWorkflowFromInput({
+        templateId: template.id,
+        title: input.title,
+        prompt: input.prompt,
+        frequency: input.frequency,
+        nextRun: input.nextRun,
+        scope: input.scope,
+      });
+
+      workflowId = workflow.id;
+      templateId = template.id;
+
+      return {
+        ...current,
+        templates: [template, ...current.templates],
+        workflows: [workflow, ...current.workflows],
+      };
+    });
+
+    return { workflowId, templateId };
   },
 };

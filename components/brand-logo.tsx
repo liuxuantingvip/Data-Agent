@@ -19,7 +19,7 @@ export function BrandLogo({ compact = false, className }: BrandLogoProps) {
         {!compact ? (
           <div className="min-w-0">
             <div className="truncate text-[15px] font-semibold tracking-[-0.03em] text-[#18181b]">MData Agent</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-[#9ca3af]">Market Intelligence</div>
+            <div className="text-[12px] uppercase tracking-[0.18em] text-[#9ca3af]">Market Intelligence</div>
           </div>
         ) : null}
       </div>

@@ -97,28 +97,37 @@ export function FavoritesWorkspace() {
           </div>
 
           <div className="mt-8 grid max-w-[720px] gap-4">
-            {filteredItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => router.push(`/artifacts?artifactId=${item.id}`)}
-                className="w-full text-left"
-              >
-                <Card className={item.id === selectedItem?.id ? "overflow-hidden border-[#d4d4d8]" : "overflow-hidden border-[#e5e7eb]"}>
-                  <div className="min-h-[118px] bg-[#fafafa] px-4 py-4 text-[13px] leading-7 text-[#71717a]">
-                    {item.body}
-                  </div>
-                  <CardContent className="flex items-center gap-3 border-t border-[#e5e7eb] px-4 py-4">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[#3b82f6] text-white">
-                      <FileText className="h-4 w-4" />
+            {filteredItems.length > 0 ? (
+              filteredItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => router.push(`/artifacts?artifactId=${item.id}`)}
+                  className="w-full text-left"
+                >
+                  <Card className={item.id === selectedItem?.id ? "overflow-hidden border-[#d4d4d8]" : "overflow-hidden border-[#e5e7eb]"}>
+                    <div className="min-h-[118px] bg-[#fafafa] px-4 py-4 text-[13px] leading-7 text-[#71717a]">
+                      {item.body}
                     </div>
-                    <div>
-                      <div className="font-medium text-[#18181b]">{item.title}</div>
-                      <div className="mt-1 text-sm text-[#a1a1aa]">{item.createdAt}</div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </button>
-            ))}
+                    <CardContent className="flex items-center gap-3 border-t border-[#e5e7eb] px-4 py-4">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[#3b82f6] text-white">
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="font-medium text-[#18181b]">{item.title}</div>
+                        <div className="mt-1 text-sm text-[#a1a1aa]">{item.createdAt}</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </button>
+              ))
+            ) : (
+              <Card className="overflow-hidden border-dashed border-[#d4d4d8] bg-[#fafafa]">
+                <CardContent className="px-5 py-8">
+                  <div className="text-[15px] font-medium text-[#18181b]">当前筛选下没有匹配的收藏结果</div>
+                  <p className="mt-2 text-sm leading-6 text-[#71717a]">可以调整关键词、切换类型，或回到任务页重新收藏结果。</p>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {selectedItem ? (

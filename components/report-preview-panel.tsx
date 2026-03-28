@@ -5,30 +5,32 @@ import { Download, Ellipsis, Expand, Minimize2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { previewResults } from "@/lib/mock/demo-data";
+import type { Report } from "@/lib/mock/store";
 
 type ReportPreviewPanelProps = {
   previewId: string;
   onClose: () => void;
   reportTitle?: string;
+  report?: Report;
 };
 
-export function ReportPreviewPanel({ previewId, onClose, reportTitle }: ReportPreviewPanelProps) {
-  const preview = useMemo(
-    () => previewResults.find((item) => item.id === previewId) ?? previewResults[0],
-    [previewId],
-  );
+export function ReportPreviewPanel({ previewId, onClose, reportTitle, report }: ReportPreviewPanelProps) {
+  const preview = useMemo(() => {
+    if (report && report.previewKey === previewId) return report;
+    return previewResults.find((item) => item.id === previewId) ?? previewResults[0];
+  }, [previewId, report]);
   const [selectedTabs, setSelectedTabs] = useState<Record<string, string>>({});
   const [actionNotice, setActionNotice] = useState("");
   const activeTab = selectedTabs[preview.id] ?? preview.sheetTabs[0]?.id ?? "";
 
   return (
-    <div className="flex h-full flex-col bg-[rgba(255,255,255,0.74)] text-[#31405a]">
-      <div className="flex items-center justify-between border-b border-[#e2e7ef] px-6 py-5">
+    <div className="flex h-full flex-col bg-white text-[#31405a]" data-testid="agent-preview-panel">
+      <div className="flex items-center justify-between border-b border-[#e5e7eb] bg-[linear-gradient(180deg,#fafafa,#f4f4f5)] px-5 py-3.5">
         <div className="min-w-0">
-          <div className="font-[family:var(--font-jakarta)] text-[18px] font-semibold text-[#22314a]">
+          <div className="text-[14px] font-semibold text-[#1f2421]">
             {reportTitle ?? preview.title}
           </div>
-          <div className="mt-1 text-sm text-[#7f8b99]">{preview.subtitle}</div>
+          <div className="mt-1 text-[11px] text-[#8b9490]">{preview.subtitle}</div>
         </div>
         <div className="flex items-center gap-2 text-[#7b8797]">
           <Button aria-label="下载预览结果" variant="ghost" size="icon" className="h-8 w-8 rounded-[10px]" onClick={() => setActionNotice("已生成 mock 下载结果，联调后可替换为真实导出。")}>
@@ -46,16 +48,16 @@ export function ReportPreviewPanel({ previewId, onClose, reportTitle }: ReportPr
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto bg-transparent">
+      <div className="min-h-0 flex-1 overflow-auto bg-white">
         {actionNotice ? (
-          <div className="border-b border-[#ececec] bg-[#fafaf9] px-6 py-2 text-xs text-[#78716c]">
+          <div className="border-b border-[#ececec] bg-[#fafaf9] px-5 py-2 text-xs text-[#78716c]">
             {actionNotice}
           </div>
         ) : null}
         {preview.mode === "sheet" ? (
           <div className="min-w-[760px]">
-            <div className="grid grid-cols-5 border-b border-[#ececec] bg-[linear-gradient(180deg,#fafafa,#f4f4f5)] text-center text-[18px] font-semibold text-[#27272a]">
-              <div className="col-span-5 px-6 py-9">{reportTitle ?? "任务执行结果"}</div>
+            <div className="grid grid-cols-5 border-b border-[#ececec] bg-[linear-gradient(90deg,#18181b,#27272a)] text-center text-white">
+              <div className="col-span-5 px-6 py-7 text-[18px] font-semibold">{reportTitle ?? "任务执行结果"}</div>
             </div>
 
             <table className="w-full border-collapse text-left text-[14px]">
@@ -66,7 +68,7 @@ export function ReportPreviewPanel({ previewId, onClose, reportTitle }: ReportPr
                       <td
                         key={`${preview.id}-${rowIndex}-${cellIndex}`}
                         className={`border-r border-[#e5eaf2] px-4 py-4 align-top ${
-                          rowIndex === 0 ? "bg-[#f6f8fc] font-medium text-[#44536d]" : "bg-[rgba(255,255,255,0.88)] text-[#6d7c91]"
+                          rowIndex === 0 ? "bg-[#f8fafc] font-medium text-[#313734]" : "bg-white text-[#6d7c91]"
                         }`}
                       >
                         {cell}
@@ -77,18 +79,18 @@ export function ReportPreviewPanel({ previewId, onClose, reportTitle }: ReportPr
               </tbody>
             </table>
 
-            <div className="space-y-3 px-6 py-8 text-sm leading-7 text-[#708096]">
+            <div className="space-y-3 px-6 py-7 text-sm leading-7 text-[#708096]">
               {preview.summary.map((line) => (
                 <p key={line}>{line}</p>
               ))}
             </div>
           </div>
         ) : (
-          <div className="px-8 py-8">
-            <div className="rounded-[18px] border border-[#e2e7ef] bg-[rgba(255,255,255,0.86)] p-6">
+          <div className="px-6 py-6">
+            <div className="rounded-[18px] border border-[#e5e7eb] bg-[linear-gradient(180deg,#ffffff,#fafafa)] p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="font-[family:var(--font-jakarta)] text-[28px] font-semibold text-[#22314a]">
+                  <div className="text-[24px] font-semibold text-[#22314a]">
                     {preview.title}
                   </div>
                   <div className="mt-2 text-sm text-[#7f8b99]">{preview.subtitle}</div>
@@ -109,7 +111,7 @@ export function ReportPreviewPanel({ previewId, onClose, reportTitle }: ReportPr
         )}
       </div>
 
-      <div className="flex items-center gap-1 border-t border-[#e2e7ef] bg-[rgba(255,255,255,0.82)] px-4 py-2">
+      <div className="flex items-center gap-1 border-t border-[#e5e7eb] bg-white px-4 py-2">
         {preview.sheetTabs.map((tab) => (
           <button
             key={tab.id}

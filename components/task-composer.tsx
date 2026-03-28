@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowUp, ArrowUpRight, ChevronDown, LibraryBig, Paperclip } from "lucide-react";
 
 import { homeCapabilityItems } from "@/lib/mock/demo-data";
@@ -31,6 +32,7 @@ type TaskComposerProps = {
   onTemplateSelect: (templateId: string) => void;
   onFilesSelected: (files: FileList) => void;
   onSubmit: () => void;
+  visualStyle?: "default" | "heroMinimal";
   containerClassName?: string;
   textareaClassName?: string;
   sendButtonClassName?: string;
@@ -229,7 +231,7 @@ function createToolTokenNode({
   button.className =
     "group mx-0.5 inline-flex h-7 items-center gap-1.5 rounded-[10px] border border-[#dbe7ff] bg-[#f4f8ff] px-2.5 align-middle text-[12px] font-medium text-[#2f5fb8]";
   button.setAttribute("contenteditable", "false");
-  button.setAttribute("aria-label", `移除工具 ${label}`);
+  button.setAttribute("aria-label", `移除数据源 ${label}`);
 
   const iconWrap = document.createElement("span");
   iconWrap.className = "inline-flex h-3 w-3 items-center justify-center";
@@ -276,11 +278,14 @@ export function TaskComposer({
   onTemplateSelect,
   onFilesSelected,
   onSubmit,
+  visualStyle = "default",
   containerClassName,
   textareaClassName,
   sendButtonClassName,
 }: TaskComposerProps) {
+  const isHeroMinimal = visualStyle === "heroMinimal";
   const fileInputId = useId();
+  const textboxRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -292,6 +297,12 @@ export function TaskComposer({
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
   const [mentionAnchorTop, setMentionAnchorTop] = useState(36);
+  const [mentionMenuStyle, setMentionMenuStyle] = useState<{ top: number; left: number; width: number; maxHeight: number }>({
+    top: 0,
+    left: 0,
+    width: 520,
+    maxHeight: 312,
+  });
   const [templateOpen, setTemplateOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [highlightedToolIndex, setHighlightedToolIndex] = useState(-1);
@@ -380,6 +391,34 @@ export function TaskComposer({
     setHighlightedToolIndex(nextIndex);
   };
 
+  const updateMentionMenuPosition = useCallback((anchorTop: number) => {
+    const textbox = textboxRef.current;
+    const editor = editorRef.current;
+    if (!textbox || !editor || typeof window === "undefined") return;
+
+    const rect = textbox.getBoundingClientRect();
+    const viewportPadding = 16;
+    const gap = 10;
+    const width = Math.min(Math.max(rect.width, 420), 620, window.innerWidth - viewportPadding * 2);
+    const left = Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - width - viewportPadding);
+    const estimatedMenuHeight = Math.min(360, Math.round(window.innerHeight * 0.42));
+    const belowTop = rect.top + anchorTop + gap;
+    const belowSpace = window.innerHeight - belowTop - viewportPadding;
+    const aboveSpace = rect.top - viewportPadding - gap;
+    const placeBottom = belowSpace >= estimatedMenuHeight || belowSpace >= aboveSpace;
+    const maxHeight = Math.max(180, Math.min(placeBottom ? belowSpace : aboveSpace, 360));
+    const top = placeBottom
+      ? belowTop
+      : Math.max(viewportPadding, rect.top - Math.min(estimatedMenuHeight, maxHeight) - gap);
+
+    setMentionMenuStyle({
+      top,
+      left,
+      width,
+      maxHeight,
+    });
+  }, []);
+
   const syncMentionState = (nextValue: string, caret: number) => {
     const prefix = nextValue.slice(0, caret);
     const match = prefix.match(/@([^\s@]*)$/);
@@ -389,14 +428,27 @@ export function TaskComposer({
     }
 
     const editor = editorRef.current;
+    const anchorTop = editor ? getCaretAnchorTop(editor) : 36;
+    updateMentionMenuPosition(anchorTop);
     setSourceButtonOpen(false);
     setTemplateOpen(false);
     setModeOpen(false);
     setMentionRange({ start: prefix.lastIndexOf("@"), end: caret });
-    setMentionAnchorTop(editor ? getCaretAnchorTop(editor) : 36);
+    setMentionAnchorTop(anchorTop);
     setMentionOpen(true);
     updateHighlightedToolIndex(-1);
   };
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const handleReposition = () => updateMentionMenuPosition(mentionAnchorTop);
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    return () => {
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+    };
+  }, [mentionAnchorTop, mentionOpen, updateMentionMenuPosition]);
 
   const removeLastSource = () => {
     const lastSource = selectedSources[selectedSources.length - 1];
@@ -523,11 +575,16 @@ export function TaskComposer({
       data-task-composer-root
       className={
         containerClassName ??
-        "relative z-30 w-full rounded-[28px] border-[#e7e5e4] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.06)]"
+        cn(
+          "relative z-30 w-full bg-white",
+          isHeroMinimal
+            ? "rounded-[20px] border-[#dfe3ea] shadow-[0_10px_28px_rgba(15,23,42,0.045)]"
+            : "rounded-[28px] border-[#e7e5e4] shadow-[0_18px_40px_rgba(15,23,42,0.06)]",
+        )
       }
     >
       <CardContent className="p-0">
-          <div className="px-4 pb-3 pt-3">
+          <div className={cn(isHeroMinimal ? "px-4 pb-2.5 pt-2.5" : "px-4 pb-3 pt-3")}>
             <div
             className="px-1"
             onKeyDownCapture={(event) => {
@@ -545,9 +602,11 @@ export function TaskComposer({
               }
             }}
           >
-            <div className="min-h-[88px]">
-              <div className="relative min-h-[72px]">
+            <div className={cn(isHeroMinimal ? "min-h-[92px]" : "min-h-[88px]")}>
+              <div className={cn("relative", isHeroMinimal ? "min-h-[80px]" : "min-h-[72px]")}>
                 <div
+                  ref={textboxRef}
+                  data-testid="task-composer-textbox"
                   role="textbox"
                   tabIndex={0}
                   onMouseDown={(event) => {
@@ -562,11 +621,13 @@ export function TaskComposer({
                     }
                   }}
                   onFocus={() => focusEditor(false)}
-                  className="relative min-h-[84px] overflow-visible"
+                  className={cn("relative overflow-visible", isHeroMinimal ? "min-h-[96px]" : "min-h-[84px]")}
                 >
-                  <div className="flex min-h-[84px] flex-wrap items-start gap-1.5">
+                  <div className={cn("flex flex-wrap items-start gap-1.5", isHeroMinimal ? "min-h-[96px]" : "min-h-[84px]")}>
                     <div
                       ref={editorRef}
+                      data-testid="task-composer-editor"
+                      aria-label="任务输入编辑器"
                       contentEditable
                       suppressContentEditableWarning
                       onBeforeInput={(event) => {
@@ -669,31 +730,42 @@ export function TaskComposer({
                       }}
                       className={cn(
                         textareaClassName ??
-                          "min-h-[28px] max-h-[10em] min-w-[180px] flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-0 py-1 pr-2 text-[14px] leading-7 text-[#1c1c1c] outline-none scrollbar-thin scrollbar-thumb-transparent hover:scrollbar-thumb-zinc-300",
+                          (isHeroMinimal
+                            ? "min-h-[28px] max-h-[10em] min-w-[180px] flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-0 py-1.5 pr-2 text-[15px] leading-7 text-[#1c1c1c] outline-none scrollbar-thin scrollbar-thumb-transparent hover:scrollbar-thumb-zinc-300"
+                            : "min-h-[28px] max-h-[10em] min-w-[180px] flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-0 py-1 pr-2 text-[14px] leading-7 text-[#1c1c1c] outline-none scrollbar-thin scrollbar-thumb-transparent hover:scrollbar-thumb-zinc-300"),
                       )}
                     />
                   </div>
                   {!value && selectedSources.length === 0 && !editorFocused ? (
-                    <div className="pointer-events-none absolute left-[1px] top-[4px] max-w-[520px] text-[13px] leading-7 text-[#a1a1aa]">
+                    <div className={cn(
+                      "pointer-events-none absolute left-[1px] max-w-[520px] leading-7",
+                      isHeroMinimal ? "top-[8px] text-[14px] text-[#b7bcc5]" : "top-[4px] text-[13px] text-[#a1a1aa]",
+                    )}>
                       {placeholder}
                     </div>
                   ) : null}
 
-                  {mentionOpen ? (
+                  {mentionOpen && typeof document !== "undefined"
+                    ? createPortal(
                     <div
-                      className="absolute left-0 right-0 z-[90] overflow-hidden rounded-[18px] border border-[#ece8e1] bg-white shadow-[0_20px_48px_rgba(24,24,27,0.14)]"
-                      style={{ top: mentionAnchorTop }}
+                      data-testid="task-composer-mention-menu"
+                      className="fixed z-[140] overflow-hidden rounded-[18px] border border-[#ece8e1] bg-white shadow-[0_20px_48px_rgba(24,24,27,0.14)]"
+                      style={{
+                        top: mentionMenuStyle.top,
+                        left: mentionMenuStyle.left,
+                        width: mentionMenuStyle.width,
+                      }}
                     >
                       <div className="flex items-center justify-between border-b border-[#f2efe9] px-4 py-3">
                         <div>
                           <div className="text-[12px] font-medium text-[#18181b]">@数据源</div>
-                          <div className="mt-0.5 text-[10px] text-[#a8a29e]">通过 @ 插入工具，不会影响首页下方提示词卡片</div>
+                          <div className="mt-0.5 text-[12px] text-[#a8a29e]">通过 @ 插入数据源，不会影响首页下方提示词卡片</div>
                         </div>
-                        <div className="rounded-full border border-[#ede9e1] bg-[#faf9f7] px-2 py-1 text-[10px] text-[#8f8a80]">
-                          已收录 {filteredTools.length}+ 工具
+                        <div className="rounded-full border border-[#ede9e1] bg-[#faf9f7] px-2 py-1 text-[12px] text-[#8f8a80]">
+                          已收录 {filteredTools.length}+ 数据源
                         </div>
                       </div>
-                      <div ref={toolListRef} className="grid max-h-[312px] gap-1 overflow-y-auto p-2.5">
+                      <div ref={toolListRef} className="grid gap-1 overflow-y-auto p-2.5" style={{ maxHeight: mentionMenuStyle.maxHeight }}>
                         {mentionTools.map((item, index) => (
                           <button
                             key={item.id}
@@ -718,11 +790,11 @@ export function TaskComposer({
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2">
                                 <span className="truncate text-[13px] font-medium text-[#27272a]">{item.label}</span>
-                                <span className="rounded-full bg-[#f5f5f4] px-1.5 py-0.5 text-[9px] text-[#8b8b91]">
-                                  工具
+                                <span className="rounded-full bg-[#f5f5f4] px-1.5 py-0.5 text-[12px] text-[#8b8b91]">
+                                  数据源
                                 </span>
                               </span>
-                              <span className="mt-1 line-clamp-2 block text-[11px] leading-4 text-[#8a8f98]">
+                              <span className="mt-1 line-clamp-2 block text-[12px] leading-4 text-[#8a8f98]">
                                 {item.promptHint}
                               </span>
                             </span>
@@ -730,7 +802,8 @@ export function TaskComposer({
                           </button>
                         ))}
                       </div>
-                    </div>
+                    </div>,
+                    document.body,
                   ) : null}
                 </div>
               </div>
@@ -741,13 +814,13 @@ export function TaskComposer({
                 {attachmentNames.slice(0, 3).map((name) => (
                   <span
                     key={name}
-                    className="inline-flex h-7 items-center rounded-full border border-[#e7e5e4] bg-[#fafaf9] px-2.5 text-[11.5px] text-[#52525b]"
+                    className="inline-flex h-7 items-center rounded-full border border-[#e7e5e4] bg-[#fafaf9] px-2.5 text-[12px] text-[#52525b]"
                   >
                     {name}
                   </span>
                 ))}
                 {attachmentNames.length > 3 ? (
-                  <span className="inline-flex h-7 items-center rounded-full border border-[#e7e5e4] bg-[#fafaf9] px-2.5 text-[11.5px] text-[#52525b]">
+                  <span className="inline-flex h-7 items-center rounded-full border border-[#e7e5e4] bg-[#fafaf9] px-2.5 text-[12px] text-[#52525b]">
                     +{attachmentNames.length - 3}
                   </span>
                 ) : null}
@@ -755,14 +828,24 @@ export function TaskComposer({
             ) : null}
           </div>
 
-          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3 border-t border-[#f1eeea] pt-2.5">
+          <div
+            className={cn(
+              "mt-2.5 flex flex-wrap items-center justify-between gap-3 pt-2.5",
+              isHeroMinimal ? "border-t border-[#eceef2]" : "border-t border-[#f1eeea]",
+            )}
+          >
             <div className="flex flex-wrap items-center gap-1.5">
               <Popover open={sourceButtonOpen} onOpenChange={setSourceButtonOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-[30px] rounded-[10px] border-[#e6e2da] bg-white px-[11px] text-[11.5px] font-medium text-[#27272a] shadow-none hover:border-[#d9d4cb] hover:bg-[#fbfaf8]"
+                    className={cn(
+                      "h-[30px] rounded-[10px] bg-white px-[11px] text-[12px] font-medium shadow-none",
+                      isHeroMinimal
+                        ? "border-[#e5e7eb] text-[#4b5563] hover:border-[#d1d5db] hover:bg-[#fafafa]"
+                        : "border-[#e6e2da] text-[#27272a] hover:border-[#d9d4cb] hover:bg-[#fbfaf8]",
+                    )}
                     type="button"
                     onClick={() => {
                       if (sourceButtonOpen) {
@@ -786,9 +869,9 @@ export function TaskComposer({
                   <div className="mb-1 flex items-center justify-between px-2 py-1">
                     <div>
                       <div className="text-[12px] font-medium text-[#18181b]">@数据源</div>
-                      <div className="mt-0.5 text-[10px] text-[#a8a29e]">选择后会以内联工具节点加入输入框</div>
+                      <div className="mt-0.5 text-[12px] text-[#a8a29e]">选择后会以内联数据源节点加入输入框</div>
                     </div>
-                    <span className="rounded-full border border-[#ede9e1] bg-[#faf9f7] px-2 py-1 text-[10px] text-[#8f8a80]">
+                    <span className="rounded-full border border-[#ede9e1] bg-[#faf9f7] px-2 py-1 text-[12px] text-[#8f8a80]">
                       全部分组
                     </span>
                   </div>
@@ -805,7 +888,7 @@ export function TaskComposer({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[12px] font-medium text-[#1f1f1f]">{item.label}</span>
-                          <span className="mt-1 line-clamp-2 block text-[10.5px] leading-4 text-[#8a8f98]">
+                          <span className="mt-1 line-clamp-2 block text-[12px] leading-4 text-[#8a8f98]">
                             {item.promptHint}
                           </span>
                         </span>
@@ -821,7 +904,12 @@ export function TaskComposer({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-[30px] rounded-[10px] border border-transparent px-[11px] text-[11.5px] font-medium text-[#6f7783] hover:border-[#e8e2d8] hover:bg-[#faf8f4] hover:text-[#27272a]"
+                    className={cn(
+                      "h-[30px] rounded-[10px] border px-[11px] text-[12px] font-medium",
+                      isHeroMinimal
+                        ? "border-transparent text-[#6b7280] hover:border-[#e5e7eb] hover:bg-[#fafafa] hover:text-[#27272a]"
+                        : "border-transparent text-[#6f7783] hover:border-[#e8e2d8] hover:bg-[#faf8f4] hover:text-[#27272a]",
+                    )}
                     type="button"
                     onClick={() => {
                       setSourceButtonOpen(false);
@@ -882,7 +970,12 @@ export function TaskComposer({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-[30px] rounded-[10px] border border-transparent px-[11px] text-[11.5px] font-medium text-[#6f7783] hover:border-[#e8e2d8] hover:bg-[#faf8f4] hover:text-[#27272a]"
+                className={cn(
+                  "h-[30px] rounded-[10px] border px-[11px] text-[12px] font-medium",
+                  isHeroMinimal
+                    ? "border-transparent text-[#6b7280] hover:border-[#e5e7eb] hover:bg-[#fafafa] hover:text-[#27272a]"
+                    : "border-transparent text-[#6f7783] hover:border-[#e8e2d8] hover:bg-[#faf8f4] hover:text-[#27272a]",
+                )}
                 onClick={() => {
                   setSourceButtonOpen(false);
                   closeMentionMenu();
@@ -909,7 +1002,12 @@ export function TaskComposer({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-[30px] rounded-[10px] border-[#e7e5e4] bg-white px-[10px] text-[11.5px] text-[#52525b] shadow-none hover:bg-[#fafaf9]"
+                    className={cn(
+                      "h-[30px] rounded-[10px] bg-white px-[10px] text-[12px] shadow-none",
+                      isHeroMinimal
+                        ? "border-[#e5e7eb] text-[#6b7280] hover:bg-[#fafafa]"
+                        : "border-[#e7e5e4] text-[#52525b] hover:bg-[#fafaf9]",
+                    )}
                     type="button"
                     onClick={() => {
                       setSourceButtonOpen(false);
@@ -952,9 +1050,13 @@ export function TaskComposer({
                 type="button"
                 onClick={onSubmit}
                 size="icon"
+                aria-label="发送任务"
+                data-testid="task-composer-submit"
                 className={
                   sendButtonClassName ??
-                  "h-[38px] w-[38px] rounded-[14px] border border-[#111111] bg-[linear-gradient(180deg,#1b1b1d,#111113)] text-white shadow-[0_12px_24px_rgba(15,15,18,0.18)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(180deg,#26262a,#121214)] hover:shadow-[0_16px_30px_rgba(15,15,18,0.24)]"
+                  (isHeroMinimal
+                    ? "h-[34px] w-[34px] rounded-[12px] border border-[#e2e5ea] bg-[#f3f4f6] text-[#9ca3af] shadow-none transition hover:border-[#d1d5db] hover:bg-[#eceef1] hover:text-[#4b5563]"
+                    : "h-[38px] w-[38px] rounded-[14px] border border-[#111111] bg-[linear-gradient(180deg,#1b1b1d,#111113)] text-white shadow-[0_12px_24px_rgba(15,15,18,0.18)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(180deg,#26262a,#121214)] hover:shadow-[0_16px_30px_rgba(15,15,18,0.24)]")
                 }
               >
                 <ArrowUp className="h-[14px] w-[14px]" />

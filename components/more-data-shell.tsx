@@ -28,6 +28,7 @@ type MoreDataShellProps = {
   rightRail?: ReactNode;
   currentRunLabel?: string;
   mainDecoration?: ReactNode;
+  contentScrollMode?: "shell" | "child";
 };
 
 export function MoreDataShell({
@@ -36,15 +37,17 @@ export function MoreDataShell({
   rightRail,
   currentRunLabel,
   mainDecoration,
+  contentScrollMode = "shell",
 }: MoreDataShellProps) {
   const { currentRunId, runs } = useDemoState();
   const recentRuns = runs.slice(0, 4);
   const showRecentActive = currentPath === "/agent";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const childManagedScroll = contentScrollMode === "child";
   return (
-    <div className="min-h-screen bg-transparent">
+    <div className={childManagedScroll ? "h-screen overflow-hidden bg-transparent" : "min-h-screen bg-transparent"}>
       <div
-        className="grid min-h-screen overflow-hidden bg-[rgba(250,249,245,0.82)]"
+        className={childManagedScroll ? "grid h-screen overflow-hidden bg-[rgba(250,249,245,0.82)]" : "grid min-h-screen bg-[rgba(250,249,245,0.82)]"}
         style={{ gridTemplateColumns: sidebarCollapsed ? "80px minmax(0,1fr)" : "272px minmax(0,1fr)" }}
       >
         <aside className={`relative border-r border-[#e2e7ef] bg-[rgba(255,255,255,0.76)] py-7 backdrop-blur-xl transition-[padding,width] ${sidebarCollapsed ? "px-4" : "px-6"}`}>
@@ -114,7 +117,7 @@ export function MoreDataShell({
           </div>
         </aside>
 
-        <main className="flex min-w-0 flex-col bg-transparent">
+        <main className={childManagedScroll ? "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-transparent" : "flex min-h-screen min-w-0 flex-col bg-transparent"}>
           <header className="flex h-[58px] items-center justify-between border-b border-[#e3e8ef] bg-[rgba(255,255,255,0.68)] px-6 backdrop-blur-xl">
             <div className="flex min-w-0 items-center gap-3">
               <Button aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} variant="ghost" size="icon" className="h-8 w-8 rounded-[10px] text-[#7e8da0]" onClick={() => setSidebarCollapsed((current) => !current)}>
@@ -134,12 +137,12 @@ export function MoreDataShell({
             </div>
           </header>
 
-          <div className={`min-h-0 flex-1 ${rightRail ? "grid grid-cols-[minmax(0,1fr)_minmax(580px,61%)]" : ""}`}>
-            <div className="relative min-w-0 overflow-auto">
+          <div className={`${childManagedScroll ? "min-h-0" : "min-h-0"} flex-1 ${rightRail ? "grid grid-cols-[minmax(0,1fr)_minmax(580px,61%)]" : ""}`}>
+            <div className={`relative min-w-0 ${contentScrollMode === "shell" ? "overflow-visible" : "overflow-hidden"}`}>
               {mainDecoration ? <div className="pointer-events-none absolute inset-0">{mainDecoration}</div> : null}
-              <div className="relative z-[1]">{children}</div>
+              <div className="relative z-[1] h-full">{children}</div>
             </div>
-            {rightRail ? <aside className="border-l border-[#e3e8ef] bg-[rgba(255,255,255,0.7)] backdrop-blur-xl">{rightRail}</aside> : null}
+            {rightRail ? <aside className={`${childManagedScroll ? "min-h-0 overflow-hidden" : "overflow-visible"} border-l border-[#e3e8ef] bg-[rgba(255,255,255,0.7)] backdrop-blur-xl`}>{rightRail}</aside> : null}
           </div>
         </main>
       </div>

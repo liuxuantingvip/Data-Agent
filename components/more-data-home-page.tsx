@@ -7,14 +7,13 @@ import { homeCapabilityItems, homePromptCards } from "@/lib/mock/demo-data";
 import { AgentWorkspace } from "@/components/agent-workspace";
 import { MoreDataShell } from "@/components/more-data-shell";
 import { PlatformLogo } from "@/components/platform-logo";
+import { sanitizeObjective } from "@/lib/agent-attachments";
 import { demoActions, useDemoState } from "@/lib/mock/store";
+import { createAgentRun, isAgentRuntimeConfigured, isMockRuntimeEnabled } from "@/lib/agent-runtime";
 import { TaskComposer } from "@/components/task-composer";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-
-function sanitizeObjective(value: string) {
-  return value.replace(/(^|\s)@[^\s]*/g, " ").replace(/\s+/g, " ").trim();
-}
+import { FlickeringGrid } from "@/components/ui/flickering-grid";
 
 export function MoreDataHomePage() {
   const router = useRouter();
@@ -26,6 +25,7 @@ export function MoreDataHomePage() {
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [composerMode, setComposerMode] = useState<"普通模式" | "深度模式">("深度模式");
   const [notice, setNotice] = useState("");
+  const [launching, setLaunching] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const activeRunId = searchParams.get("runId");
 
@@ -35,22 +35,52 @@ export function MoreDataHomePage() {
     return filtered.length > 0 ? filtered : homePromptCards;
   }, [activeCapabilityId]);
 
-  const launchAgent = (seed?: string) => {
+  const launchAgent = async (seed?: string) => {
     const nextQuery = sanitizeObjective(seed ?? query);
     if (!nextQuery) {
       setNotice("请先输入一个研究目标，或从下方示例任务中直接发起。");
       return;
     }
-    const runId = demoActions.startTaskRun({
-      objective: nextQuery,
-      mode: composerMode === "深度模式" ? "专业模式" : "轻量模式",
-      selectedCapabilities: selectedSourceIds.length > 0
-        ? selectedSourceIds
-        : activeCapabilityId === "scenarios"
-          ? []
-          : [activeCapabilityId],
-    });
-    router.replace(`/?runId=${runId}`);
+    const selectedCapabilities = selectedSourceIds.length > 0
+      ? selectedSourceIds
+      : activeCapabilityId === "scenarios"
+        ? []
+        : [activeCapabilityId];
+
+    if (isMockRuntimeEnabled()) {
+      setLaunching(true);
+      try {
+        const runId = demoActions.startTaskRun({
+          objective: nextQuery,
+          mode: composerMode === "深度模式" ? "专业模式" : "轻量模式",
+          selectedCapabilities,
+        });
+        setNotice(`已进入 mock 演示会话：${nextQuery}`);
+        router.replace(`/?runId=${runId}`);
+      } finally {
+        setLaunching(false);
+      }
+      return;
+    }
+
+    if (!isAgentRuntimeConfigured()) {
+      setNotice("会话后端接口未配置。请先设置 NEXT_PUBLIC_AGENT_API_BASE_URL。");
+      return;
+    }
+    setLaunching(true);
+    try {
+      const snapshot = await createAgentRun({
+        objective: nextQuery,
+        mode: composerMode === "深度模式" ? "专业模式" : "轻量模式",
+        selectedCapabilities,
+      });
+      demoActions.upsertRunSnapshot(snapshot.run, snapshot.report);
+      router.replace(`/?runId=${snapshot.run.id}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "发起任务失败，请检查会话后端接口。");
+    } finally {
+      setLaunching(false);
+    }
   };
 
   const applyBrowseCapability = (capabilityId: string) => {
@@ -64,7 +94,7 @@ export function MoreDataHomePage() {
     const item = homeCapabilityItems.find((entry) => entry.id === capabilityId);
     if (!item || item.id === "scenarios") return;
     setSelectedSourceIds((current) => (current.includes(item.id) ? current : [...current, item.id]));
-    setNotice(`已选择工具「${item.label}」，可以继续补充要求后直接发送。`);
+    setNotice(`已选择数据源「${item.label}」，可以继续补充要求后直接发送。`);
   };
 
   const removeComposerTool = (capabilityId: string) => {
@@ -131,21 +161,39 @@ export function MoreDataHomePage() {
       currentPath="/"
       mainDecoration={
         <>
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-4%,rgba(255,255,255,0.98),rgba(255,255,255,0)_32%),linear-gradient(180deg,rgba(0,0,0,0.015),transparent_14%,transparent_100%)]" />
-          <div className="absolute left-1/2 top-0 h-[320px] w-[860px] -translate-x-1/2 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.98),rgba(255,255,255,0)_70%)]" />
+          <div className="absolute inset-0 z-0 bg-[linear-gradient(180deg,#ffffff_0%,#fdfdfd_52%,#fbfbfb_100%)]" />
+          <div className="absolute left-1/2 top-[78px] z-0 h-[360px] w-[980px] -translate-x-1/2 overflow-hidden">
+            <FlickeringGrid
+              className="absolute inset-0 size-full opacity-[0.28] [mask-image:radial-gradient(circle_at_50%_42%,black_0%,black_34%,transparent_78%)]"
+              squareSize={4}
+              gridGap={6}
+              color="#6B7280"
+              maxOpacity={0.5}
+              flickerChance={0.1}
+              height={360}
+              width={980}
+            />
+          </div>
+          <div className="absolute left-1/2 top-[78px] z-0 h-[360px] w-[980px] -translate-x-1/2 bg-[radial-gradient(circle_at_50%_42%,rgba(0,0,0,0.02),transparent_58%)] opacity-20" />
+          <div className="absolute left-1/2 top-[44px] z-0 h-[420px] w-[620px] -translate-x-1/2 opacity-[0.12]">
+            <div className="absolute left-[82px] top-[12px] h-[46px] w-[148px] skew-x-[-34deg] rounded-[2px] border border-[#d6d9df]" />
+            <div className="absolute left-[214px] top-[0] h-[322px] w-[156px] skew-x-[-34deg] rounded-[2px] border border-[#d6d9df]" />
+            <div className="absolute left-[168px] top-[286px] h-[72px] w-[212px] skew-x-[-34deg] rounded-[2px] border border-[#e3e6ea]" />
+          </div>
+          <div className="absolute inset-0 z-[1] bg-[radial-gradient(circle_at_50%_-4%,rgba(255,255,255,0.96),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.72)_74%,rgba(255,255,255,0.92)_100%)]" />
         </>
       }
     >
       <div className="px-8 pb-8 pt-8">
         <div className="mx-auto w-full max-w-[1180px] pt-4">
-          <div className="mx-auto max-w-[760px] text-center">
-            <h1 className="font-[family:var(--font-jakarta)] text-[34px] font-semibold tracking-[-0.05em] text-[#171717] md:text-[42px]">
-              跨境电商 AI 运营助手
+          <div className="mx-auto max-w-[760px] pt-18 text-center md:pt-24">
+            <h1 className="font-[family:var(--font-jakarta)] text-[48px] font-semibold tracking-[-0.065em] text-[#18181b] md:text-[66px]">
+              跨境运营助手
             </h1>
-            <p className="mt-2 text-[13px] leading-[1.7] text-[#6b7280] md:text-[13.5px]">数据、选品、调研、分析...</p>
+            <p className="mt-3 text-[15px] leading-[1.7] text-[#585d66] md:text-[16px]">数据、选品、调研、分析...</p>
           </div>
 
-          <div className="mx-auto mt-4 max-w-[720px]">
+          <div className="mx-auto mt-12 max-w-[820px]">
             <TaskComposer
               value={query}
               onValueChange={setQuery}
@@ -158,20 +206,19 @@ export function MoreDataHomePage() {
               onSourceRemove={removeComposerTool}
               onTemplateSelect={applyTemplate}
               onFilesSelected={handleFilesSelected}
-              onSubmit={() => launchAgent()}
+              onSubmit={() => {
+                if (!launching) {
+                  void launchAgent();
+                }
+              }}
+              visualStyle="heroMinimal"
             />
-            <div className="mt-3 flex items-center justify-between gap-4 px-2">
-              <div className="text-xs text-[#8b7355]">{notice || "有任何使用上的困惑，请随时联系我们！"}</div>
-              <button
-                type="button"
-                className="text-xs font-medium text-[#6b7280] transition hover:text-[#23262d]"
-              >
-                联系我们
-              </button>
-            </div>
+            <p className="sr-only" aria-live="polite">
+              {notice}
+            </p>
           </div>
 
-          <div className="mx-auto mt-4 flex max-w-[960px] flex-wrap items-center justify-center gap-x-1.5 gap-y-1.5 text-[12px] text-[#71717a]">
+          <div className="mx-auto mt-10 flex max-w-[920px] flex-wrap items-center justify-center gap-x-1.5 gap-y-2 text-[12px] text-[#8f949d] opacity-70">
             {homeCapabilityItems.map((item) => {
               const active = item.id === activeCapabilityId;
               return (
@@ -180,8 +227,8 @@ export function MoreDataHomePage() {
                   onClick={() => applyBrowseCapability(item.id)}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[3px] transition duration-300 ${
                     active
-                      ? "border-[#d4d4d8] bg-[#f4f4f5] text-[#18181b] shadow-[0_10px_20px_rgba(15,23,42,0.06)]"
-                      : "border-[#e4e4e7] bg-[rgba(255,255,255,0.9)] text-[#71717a] hover:border-[#d4d4d8] hover:bg-white hover:text-[#18181b] hover:-translate-y-0.5"
+                      ? "border-[#d8dbe0] bg-[#f7f8fa] text-[#30343a] shadow-[0_6px_14px_rgba(15,23,42,0.04)]"
+                      : "border-[#eceef2] bg-[rgba(255,255,255,0.86)] text-[#8b9099] hover:border-[#d8dbe0] hover:bg-white hover:text-[#30343a]"
                   }`}
                 >
                   <span className="inline-flex h-3 w-3 items-center justify-center">
@@ -193,9 +240,9 @@ export function MoreDataHomePage() {
             })}
           </div>
 
-          <div className="mt-8 pb-2 text-center text-[13px] font-medium text-[#8d8f96]">探索精选提示词</div>
+          <div className="mt-18 pb-2 text-center text-[12px] font-medium tracking-[0.02em] text-[#b1b5bc]">探索精选提示词</div>
 
-          <div className="mt-4 grid gap-3 pb-6 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-5 grid gap-3 pb-6 md:grid-cols-2 xl:grid-cols-4">
             {cards.map((card) => (
               <div
                 key={card.id}
@@ -211,18 +258,18 @@ export function MoreDataHomePage() {
                   }
                 }}
                 className={`group relative overflow-hidden rounded-[18px] border text-left outline-none transition duration-300 ${
-                  "border-[#ececee] bg-[linear-gradient(180deg,#ffffff,#fcfcfc)] shadow-[0_8px_18px_rgba(15,23,42,0.03)] hover:-translate-y-0.5 hover:border-[#d8dadd] hover:bg-[linear-gradient(180deg,#ffffff,#fafafa)] hover:shadow-[0_18px_34px_rgba(15,23,42,0.08)] focus-visible:-translate-y-0.5 focus-visible:border-[#d8dadd] focus-visible:bg-[linear-gradient(180deg,#ffffff,#fafafa)] focus-visible:shadow-[0_18px_34px_rgba(15,23,42,0.08)]"
+                  "border-[#f0f1f3] bg-[linear-gradient(180deg,#ffffff,#fdfdfd)] shadow-[0_6px_14px_rgba(15,23,42,0.025)] hover:-translate-y-0.5 hover:border-[#e0e3e8] hover:bg-[linear-gradient(180deg,#ffffff,#fbfbfb)] hover:shadow-[0_14px_28px_rgba(15,23,42,0.055)] focus-visible:-translate-y-0.5 focus-visible:border-[#e0e3e8] focus-visible:bg-[linear-gradient(180deg,#ffffff,#fbfbfb)] focus-visible:shadow-[0_14px_28px_rgba(15,23,42,0.055)]"
                 }`}
               >
                 <div className="flex min-h-[148px] flex-col px-4 py-3.5">
                   <div className="min-w-0">
-                    <div className="line-clamp-4 text-[11px] leading-5 text-[#666a73]">
+                    <div className="line-clamp-4 text-[12px] leading-5 text-[#7d828b]">
                       {card.body.length > 68 ? `${card.body.slice(0, 68)}…` : card.body}
                     </div>
                   </div>
                   <div className="mt-auto pt-3">
-                    <div className="text-[13px] font-medium tracking-[-0.02em] text-[#202020]">{card.title}</div>
-                    <div className="mt-1 text-[10px] leading-4 text-[#9ea2ad]">{card.meta}</div>
+                    <div className="text-[13px] font-medium tracking-[-0.02em] text-[#24272d]">{card.title}</div>
+                    <div className="mt-1 text-[12px] leading-4 text-[#b0b4bc]">{card.meta}</div>
                   </div>
                 </div>
               </div>

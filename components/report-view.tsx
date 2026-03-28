@@ -34,12 +34,12 @@ export function ReportView() {
   return (
     <MoreDataShell currentPath="/report" currentRunLabel={run.title}>
       <div className="h-full overflow-auto">
-        <div className="flex items-center justify-between border-b border-[#e2e7ef] px-8 py-5">
+        <div className="flex items-center justify-between border-b border-[#e5e7eb] bg-[linear-gradient(180deg,#fafafa,#f4f4f5)] px-8 py-3.5">
           <div>
-            <div className="font-[family:var(--font-jakarta)] text-[18px] font-semibold text-[#22314a]">
+            <div className="text-[15px] font-semibold text-[#1f2421]">
               {report.title}
             </div>
-            <div className="mt-1 text-sm text-[#7f8b99]">{report.subtitle}</div>
+            <div className="mt-1 text-[11px] text-[#8b9490]">{report.subtitle}</div>
           </div>
           <div className="flex items-center gap-2 text-[#7b8797]">
             <Button aria-label="分享结果页" variant="ghost" size="icon" className="h-8 w-8 rounded-[10px]" onClick={() => setNotice("已生成 mock 分享结果。")}>
@@ -69,7 +69,7 @@ export function ReportView() {
                   onClick={() => setActiveTab(tab.id)}
                   variant={activeTab === tab.id ? "default" : "secondary"}
                   size="sm"
-                  className="rounded-[9px]"
+                  className={`rounded-[9px] ${activeTab === tab.id ? "bg-[#171717] text-white hover:bg-[#27272a]" : ""}`}
                 >
                   {tab.label}
                 </Button>
@@ -91,17 +91,17 @@ export function ReportView() {
                 {report.summary.map((line) => (
                   <div
                     key={line}
-                    className="rounded-[16px] border border-[#e2e7ef] bg-[rgba(255,255,255,0.84)] px-5 py-5 text-[15px] leading-8 text-[#63738a]"
+                    className="rounded-[16px] border border-[#e5e7eb] bg-white px-5 py-5 text-[14px] leading-8 text-[#5e6763] shadow-[0_8px_20px_rgba(15,23,42,0.04)]"
                   >
                     {line}
                   </div>
                 ))}
               </div>
-              <div className="rounded-[20px] border border-[#e2e7ef] bg-[linear-gradient(180deg,#ffffff,#f7f9fd)] p-5">
-                <div className="text-xs uppercase tracking-[0.2em] text-[#7a889d]">Run Context</div>
-                <div className="mt-4 text-lg font-semibold text-[#243248]">{run.title}</div>
-                <p className="mt-3 text-sm leading-7 text-[#708096]">{run.objective}</p>
-                <div className="mt-5 space-y-3 text-sm text-[#7e8ca0]">
+              <div className="rounded-[18px] border border-[#d4d4d8] bg-[linear-gradient(180deg,#ffffff,#fafafa)] p-5 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                <div className="text-[13px] font-medium text-[#24322b]">任务上下文</div>
+                <div className="mt-4 text-[18px] font-semibold text-[#243248]">{run.title}</div>
+                <p className="mt-3 text-[13px] leading-7 text-[#5e6763]">{run.objective}</p>
+                <div className="mt-5 space-y-3 text-[12px] text-[#7e8ca0]">
                   <div>生成时间：{report.generatedAt}</div>
                   <div>任务模式：{run.mode}</div>
                   <div>已补充追问：{run.notes.length} 条</div>
@@ -109,9 +109,9 @@ export function ReportView() {
               </div>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-[18px] border border-[#e2e7ef] bg-[rgba(255,255,255,0.92)]">
-              <div className="grid grid-cols-5 bg-[linear-gradient(180deg,#fafafa,#f4f4f5)] text-center text-[18px] font-semibold text-[#27272a]">
-                <div className="col-span-5 px-6 py-8">{report.title}</div>
+            <div className="overflow-hidden rounded-[18px] border border-[#e5e7eb] bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+              <div className="grid grid-cols-5 bg-[linear-gradient(90deg,#18181b,#27272a)] text-center text-white">
+                <div className="col-span-5 px-6 py-7 text-[18px] font-semibold">{report.title}</div>
               </div>
 
               <table className="w-full border-collapse text-left text-[14px]">
@@ -122,7 +122,7 @@ export function ReportView() {
                         <td
                           key={`${report.id}-${rowIndex}-${cellIndex}`}
                           className={`border-r border-[#e5eaf2] px-4 py-4 align-top ${
-                            rowIndex === 0 ? "bg-[#f6f8fc] font-medium text-[#44536d]" : "text-[#6d7c91]"
+                            rowIndex === 0 ? "bg-[#f8fafc] font-medium text-[#313734]" : "bg-white text-[#6d7c91]"
                           }`}
                         >
                           {cell}

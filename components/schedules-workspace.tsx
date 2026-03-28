@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronDown, List, Plus, Search } from "lucide-react";
 
@@ -57,25 +57,62 @@ export function SchedulesWorkspace() {
   const selectedWorkflow = filteredScheduled.find((item) => item.id === selectedWorkflowId) ?? filteredScheduled[0];
   const selectedRun = filteredRuns.find((item) => item.runId === selectedRunId) ?? filteredRuns[0];
 
-  const createWorkflow = () => {
-    const selectedTemplate =
-      currentTemplate ??
-      (selectedWorkflow ? templates.find((item) => item.id === selectedWorkflow.templateId) : undefined) ??
-      templates[0];
-    if (!selectedTemplate) {
-      setNotice("当前还没有可转成定时任务的模板。");
+  useEffect(() => {
+    if (createMode) return;
+    if (primaryTab === "已定时") {
+      if (!searchParams.get("workflowId")) return;
+      if (selectedWorkflow) return;
+      if (filteredScheduled[0]) {
+        router.push(`/schedules?workflowId=${filteredScheduled[0].id}`);
+        return;
+      }
+      router.push("/schedules");
       return;
     }
-    const workflowId = demoActions.createWorkflow({
-      templateId: selectedTemplate.id,
-      title: title.trim() || `${selectedTemplate.title} · 周期执行`,
-      prompt: prompt.trim() || selectedTemplate.body,
+
+    if (!searchParams.get("runId")) return;
+    if (selectedRun) return;
+    if (filteredRuns[0]) {
+      router.push(`/schedules?runId=${filteredRuns[0].runId}`);
+      return;
+    }
+    router.push("/schedules");
+  }, [createMode, filteredRuns, filteredScheduled, primaryTab, router, searchParams, selectedRun, selectedWorkflow]);
+
+  const createWorkflow = () => {
+    const normalizedTitle = title.trim();
+    const normalizedPrompt = prompt.trim();
+    const nextRun = `${new Date().toISOString().slice(0, 10)} ${timeValue}`;
+
+    setPrimaryTab("已定时");
+    setStatusFilter("全部状态");
+    setActiveChip(formGroupToScope(currentTemplate?.scope ?? "默认"));
+    setSearch("");
+
+    if (currentTemplate) {
+      const workflowId = demoActions.createWorkflow({
+        templateId: currentTemplate.id,
+        title: normalizedTitle || `${currentTemplate.title} · 周期执行`,
+        prompt: normalizedPrompt || currentTemplate.body,
+        frequency: `${frequency} ${timeValue}`,
+        nextRun,
+        scope: currentTemplate.scope,
+      });
+      setNotice(`已根据「${currentTemplate.title}」创建定时任务。`);
+      router.push(`/schedules?workflowId=${workflowId}&templateId=${currentTemplate.id}`);
+      return;
+    }
+
+    const nextScope = "默认" as const;
+    const { workflowId, templateId } = demoActions.createWorkflowWithTemplate({
+      title: normalizedTitle,
+      prompt: normalizedPrompt,
       frequency: `${frequency} ${timeValue}`,
-      nextRun: `${new Date().toISOString().slice(0, 10)} ${timeValue}`,
-      scope: selectedTemplate.scope,
+      nextRun,
+      scope: nextScope,
     });
-    setNotice(`已根据「${selectedTemplate.title}」创建定时任务。`);
-    router.push(`/schedules?workflowId=${workflowId}&templateId=${selectedTemplate.id}`);
+    setNotice(`已创建定时任务「${normalizedTitle}」。`);
+    router.push(`/schedules?workflowId=${workflowId}&templateId=${templateId}`);
   };
 
   const submitCreate = () => {
@@ -295,6 +332,7 @@ export function SchedulesWorkspace() {
                     key={(item as Workflow).id}
                     title={(item as Workflow).title}
                     meta={`${(item as Workflow).frequency} · ${(item as Workflow).nextRun}`}
+                    status={(item as Workflow).status}
                     active={(item as Workflow).id === selectedWorkflow?.id}
                     onClick={() => router.push(`/schedules?workflowId=${(item as Workflow).id}`)}
                   />
@@ -328,11 +366,13 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function ScheduleCard({
   title,
   meta,
+  status,
   active,
   onClick,
 }: {
   title: string;
   meta: string;
+  status?: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -340,10 +380,21 @@ function ScheduleCard({
     <button onClick={onClick} className="w-full text-left">
       <Card className={active ? "border-[#d4d4d8]" : "border-[#e5e7eb]"}>
         <CardContent className="px-4 py-4">
-          <div className="font-medium text-[#18181b]">{title}</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-medium text-[#18181b]">{title}</div>
+            {status ? (
+              <span className="rounded-full border border-[#dbe4ee] bg-[#f8fafc] px-2.5 py-1 text-xs text-[#617285]">
+                {status}
+              </span>
+            ) : null}
+          </div>
           <div className="mt-2 text-sm text-[#a1a1aa]">{meta}</div>
         </CardContent>
       </Card>
     </button>
   );
+}
+
+function formGroupToScope(scope: "全部" | "默认") {
+  return scope === "全部" ? "全部" : "默认";
 }
